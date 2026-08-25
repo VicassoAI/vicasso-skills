@@ -1,19 +1,24 @@
-name: Validate marketplace
+name: Validate
 
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened]
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -28,13 +33,16 @@ jobs:
 
       # Each plugin's manifest plus the frontmatter of every SKILL.md it owns.
       # Loops over the directory so adding a plugin needs no change here.
+      # Keep going after a failure so one bad plugin does not hide the next.
       - name: Validate each plugin
         shell: bash
         run: |
+          fail=0
           for plugin in plugins/*/; do
             echo "--- ${plugin}"
-            claude plugin validate "${plugin}"
+            claude plugin validate "${plugin}" || fail=1
           done
+          exit "${fail}"
 
       # What the two steps above pass clean. Each is silent and customer-visible:
       # a dangling source ships an entry that cannot install, a plugin directory
@@ -50,6 +58,7 @@ jobs:
 
           const ROOT = process.cwd()
           const CATALOG = '.claude-plugin/marketplace.json'
+          const SOURCE_RE = /^\.\/plugins\/([^./][^/]*)$/
           const errors = []
           const dirs = (p) =>
             existsSync(p)
@@ -59,15 +68,30 @@ jobs:
           const catalog = JSON.parse(readFileSync(join(ROOT, CATALOG), 'utf8'))
           const entries = Array.isArray(catalog.plugins) ? catalog.plugins : []
           const listed = new Set()
+          const seenNames = new Set()
+          const seenDirs = new Set()
 
           for (const entry of entries) {
             const name = entry?.name ?? 'unnamed'
+            if (seenNames.has(name)) {
+              errors.push(`${CATALOG}: duplicate plugin name "${name}"`)
+            } else {
+              seenNames.add(name)
+            }
+
             const source = String(entry?.source ?? '')
-            if (!source.startsWith('./plugins/')) {
+            const match = SOURCE_RE.exec(source)
+            if (source.includes('..') || !match) {
               errors.push(`${CATALOG} ${name}: source "${source}" must be "./plugins/<name>"`)
               continue
             }
-            listed.add(source.replace(/^\.\//, '').replace(/\/+$/, '').split('/')[1])
+            const dirName = match[1]
+            if (seenDirs.has(dirName)) {
+              errors.push(`${CATALOG}: duplicate source "${source}"`)
+              continue
+            }
+            seenDirs.add(dirName)
+            listed.add(dirName)
 
             const dir = join(ROOT, source)
             const manifest = join(dir, '.claude-plugin', 'plugin.json')

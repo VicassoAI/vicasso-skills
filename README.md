@@ -1,32 +1,31 @@
+![Vicasso Logo](https://cdn.prod.website-files.com/60fb23dfe1da5e6c58b78467/65a692ad7624a0885e247d62_Vicasso-logo-Color-white-teal-text-WeAccelerateService-300px-wide.png)
+
 # Vicasso Skills
 
 **Bring better Salesforce case operations into every AI conversation.**
 
-Vicasso Skills are reusable [Agent Skills](https://agentskills.io/) that help authorized service leaders work more effectively with data and workflows from Vicasso's Salesforce-native case management apps through Salesforce MCP.
+Vicasso Skills are reusable [Agent Skills](https://agentskills.io/) for headless Salesforce service operations performed through AI assistants such as Claude rather than exclusively in the Salesforce UI. Used with Salesforce MCP, they give authorized users the app-specific context and instructions needed to retrieve and interpret case management data and execute Vicasso-powered workflows.
 
 > [!NOTE]
-> **Preview:** Vicasso Skills are being published incrementally. Watch or star this repository for new skills and guidance.
+> **Preview:** Vicasso Skills are being published incrementally. Watch this repository for updates, or star it to bookmark it.
 
 ## What Vicasso Skills can help you do
 
-Vicasso Skills are designed to make natural-language interactions with Vicasso-powered Salesforce data more useful, consistent, and operationally aware.
-
-Depending Vicasso products installed in your Salesforce org, the selected skill, your Salesforce configuration, and the tools and permissions exposed through MCP, use cases may include:
+Capabilities depend on the Vicasso solutions installed in your Salesforce org and the tools and permissions exposed through MCP. Examples include:
 
 * Analyzing service performance, survey results, NPS, CSAT, and customer feedback
 * Preparing coaching guidance based on customer survey feedback
 * Surfacing prioritized, aging, or flagged cases
 * Summarizing case comment history and drafting grounded customer responses
-* Identifying cases that may be duplicates or contain multiple unrelated issues
-* Sending customer emails when a skill explicitly supports the action and the user is authorized to perform it
+* Sending emails to customers
 
 For example, with a Simple Survey skill, a service manager could ask in Claude:
 
 > "What was our NPS score for the first half of the year? Which service reps had the highest and lowest survey scores?"
 
-and then request coaching recommendations grounded in real customer feedback.
+They could then request coaching recommendations grounded in real customer feedback.
 
-With a Case Flags skill, a support rep could schedule a task in Claude to answer:
+With a Case Flags skill, a support rep could ask:
 
 > "What are my flagged cases?"
 
@@ -40,7 +39,7 @@ Vicasso Skills package that context into reusable instructions so compatible AI 
 
 * Recognize when a Vicasso workflow applies
 * Select and sequence the appropriate Salesforce MCP tools, objects, and fields
-* Interpret Vicasso data more accurately
+* Interpret Vicasso-powered Salesforce data more accurately
 * Follow consistent operating guidance
 * Produce more useful outputs with less prompting from the user
 
@@ -82,8 +81,8 @@ Each published skill directory will contain a `SKILL.md` file and any supporting
 
 Vicasso currently provides skills for:
 
-- [Case Flags](plugins/case-flags/skills)
-- [Simple Survey](plugins/simple-survey/skills)
+- [Case Flags](/plugins/case-flags/skills/)
+- [Simple Survey](/plugins/simple-survey/skills/)
 
 ## Prerequisites
 
@@ -103,7 +102,7 @@ Installation steps vary by AI platform.
 
 ### Claude
 
-#### For individual usage
+#### For individual use
 
 Individual Claude users on paid plans can add this repository as a plugin marketplace:
 
@@ -118,7 +117,7 @@ Individual Claude users on paid plans can add this repository as a plugin market
 > [!NOTE]
 > On Enterprise plans, administrators may restrict which plugins users can install.
 
-#### For org-wide usage
+#### For org-wide use
 
 Team and Enterprise owners can distribute Vicasso Skills to all users:
 
@@ -138,8 +137,7 @@ Installing Vicasso Skills through the marketplace makes it easy to stay current 
 
 ### Other AI platforms
 
-Setup instructions for other AI platforms to be added. You can also download the skill directory including the SKILL.md content to manually add to your AI platform, but you will not receive updates from Vicasso.
-
+Setup instructions for other AI platforms will be added. You can also download the complete skill directory, including its `SKILL.md` file, and manually add it to your AI platform. Manually installed skills will not receive updates automatically.
 ## Using Vicasso skills
 
 Before using a Vicasso Skill, make sure Salesforce MCP is configured, connected, and authenticated for your Salesforce org.
@@ -151,11 +149,11 @@ After installation, type `/` or click the `+` button in chat to view the skills 
 Vicasso Skills provide instructions to an AI agent. They do not grant Salesforce access or create a separate security boundary. What an agent can read or change is governed by the authenticated Salesforce identity, the MCP configuration and enabled tools, and your Salesforce security model.
 
 > [!CAUTION]
-> Understand your Salesforce org's security and privacy before installing and using any AI skills.
+> Review your Salesforce org's security, privacy, and governance requirements before installing or using any AI skills.
 
 * Follow Salesforce platform security best practices, including least-privilege access, appropriate permission sets, object permissions, field-level security, sharing rules, and narrowly scoped OAuth access. Prefer read-only MCP tools when write access is unnecessary.
 * Require human review or confirmation for consequential actions, customer communications, and employee coaching or personnel decisions.
-* Review the AI provider's data retention, model-training, privacy, and enterprise controls before exposing Salesforce data. Data sent to an external AI platform may be processed outside Salesforce according to that provider's terms and your configuration.
+* Review the AI provider's data retention, model training, privacy, and enterprise controls before exposing Salesforce data. Data sent to an external AI platform may be processed outside Salesforce according to that provider's terms and your configuration.
 * Never place Salesforce credentials, OAuth tokens, client secrets, session IDs, or other sensitive secrets in a skill file or prompt.
 
 See [Salesforce Hosted MCP Servers](https://developer.salesforce.com/docs/platform/hosted-mcp-servers/guide/hosted-mcp-servers-overview.html) and [Salesforce Well-Architected: Secure](https://architect.salesforce.com/docs/architect/well-architected/guide/secure.html) for additional guidance.

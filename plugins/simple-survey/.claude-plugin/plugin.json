@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "simple-survey",
+  "displayName": "Simple Survey",
+  "description": "Skills for working with Simple Survey in Salesforce.",
+  "author": {
+    "name": "Vicasso",
+    "url": "https://vicasso.com"
+  },
+  "homepage": "https://vicasso.com/products/simple-survey",
+  "repository": "https://github.com/VicassoAI/vicasso-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "vicasso",
+    "salesforce",
+    "service-cloud",
+    "surveys",
+    "simple-survey"
+  ]
+}

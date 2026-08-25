@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "case-flags",
+  "displayName": "Case Flags",
+  "description": "Skills for working with Case Flags in Salesforce.",
+  "author": {
+    "name": "Vicasso",
+    "url": "https://vicasso.com"
+  },
+  "homepage": "https://vicasso.com/products/case-flags",
+  "repository": "https://github.com/VicassoAI/vicasso-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "vicasso",
+    "salesforce",
+    "service-cloud",
+    "case-management",
+    "case-flags"
+  ]
+}

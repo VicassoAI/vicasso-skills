@@ -1,0 +1,26 @@
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node
+node_modules/
+npm-debug.log*
+*.tsbuildinfo
+
+# Python (skills ship helper scripts)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/plugins/
+
+# Packaged skill bundles — publish through the marketplace, not checked-in zips
+*.zip
+*.tgz

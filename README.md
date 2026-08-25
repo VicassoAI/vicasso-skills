@@ -82,8 +82,8 @@ Each published skill directory will contain a `SKILL.md` file and any supporting
 
 Vicasso currently provides skills for:
 
-- [Case Flags](http://github.com/VicassoAI/vicasso-skills/plugins/case-flags/skills)
-- [Simple Survey](http://github.com/VicassoAI/vicasso-skills/plugins/case-flags/skills)
+- [Case Flags](plugins/case-flags/skills)
+- [Simple Survey](plugins/simple-survey/skills)
 
 ## Prerequisites
 

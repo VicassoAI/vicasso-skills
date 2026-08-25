@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "vicasso",
+  "description": "Claude Code skills for Vicasso's native Salesforce case management apps.",
+  "owner": {
+    "name": "Vicasso",
+    "url": "https://vicasso.com"
+  },
+  "plugins": [
+    {
+      "name": "case-flags",
+      "source": "./plugins/case-flags",
+      "strict": true,
+      "description": "Skills for working with Vicasso Case Flags in Salesforce.",
+      "category": "salesforce"
+    },
+    {
+      "name": "simple-survey",
+      "source": "./plugins/simple-survey",
+      "strict": true,
+      "description": "Skills for working with Vicasso Simple Survey in Salesforce.",
+      "category": "salesforce"
+    }
+  ]
+}

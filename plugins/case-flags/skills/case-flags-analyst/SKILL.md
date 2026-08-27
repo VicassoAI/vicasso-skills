@@ -1,5 +1,6 @@
 ---
 name: case-flags-analyst
+license: Apache-2.0
 compatibility: Requires a connected Salesforce MCP server with read access to the Case Flags managed package (FLAGS__), and Python 3.9+ for the bundled scripts.
 description: Personal and managerial responsiveness analyst for the Vicasso Case Flags managed package, working over a connected Salesforce MCP. Use this whenever someone asks about their Case Flags work in plain language — "what's my day look like", "my flagged cases", "what should I work on", "am I overloaded / do I have a light day", "what's due today", "what's falling through the cracks" — or, for managers, "how is my team doing", "who's overloaded", "who needs help". Also use for Case Flags responsiveness questions - initial response time, ongoing responsiveness, interpreting Case Flags History Tracking, and going beyond the standard packaged reports. Trigger even when the person doesn't say "Case Flags" by name, as long as the org has Case Flags installed and the request is about flagged cases, follow-ups, response times, or triaging support work by urgency.
 ---

@@ -11,30 +11,67 @@ on:
 permissions:
   contents: read
 
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-      - uses: actions/setup-node@v7
+jobs:
+  validate-specifications:
+    name: Validate Specifications
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-tags: true
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
-      - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+      - name: validate-versions
+        run: node scripts/validate-versions.mjs
 
-      # Marketplace manifest schema. Fails on malformed JSON or a missing required
-      # field, and reads each plugin's plugin.json. Verified not to check SKILL.md
-      # frontmatter, which is what the next step is for.
-      - name: Validate marketplace manifest
+      - name: validate-version-bumped
+        if: ${{ github.event_name == 'pull_request' }}
+        run: node scripts/validate-versions.mjs --ahead-of-latest-tag
+
+      - name: validate-skill-spec
+        if: ${{ !cancelled() }}
+        run: node scripts/validate-skill-spec.mjs
+
+      - name: validate-plugin-spec
+        if: ${{ !cancelled() }}
+        run: node scripts/validate-plugin-spec.mjs
+
+  validate-claude:
+    name: Validate Claude
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Unpinned on purpose: this job exists to catch the current CLI rejecting
+      # what we ship, which a pin would hide.
+      - name: Install the Claude Code CLI
+        run: npm install -g --no-fund --no-audit @anthropic-ai/claude-code
+
+      - name: Validate the marketplace manifest
         run: claude plugin validate .
 
-      # Each plugin's manifest plus the frontmatter of every SKILL.md it owns.
-      # Loops over the directory so adding a plugin needs no change here.
-      # Keep going after a failure so one bad plugin does not hide the next.
-      - name: Validate each plugin
+      - name: Validate each plugin and its skills
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           fail=0
@@ -43,89 +80,3 @@ jobs:
             claude plugin validate "${plugin}" || fail=1
           done
           exit "${fail}"
-
-      # What the two steps above pass clean. Each is silent and customer-visible:
-      # a dangling source ships an entry that cannot install, a plugin directory
-      # missing from the catalog never reaches anyone, and a skill directory with
-      # no SKILL.md is not a skill at all. Measured: `claude plugin validate .`
-      # reports "Validation passed", exit 0, for all three.
-      - name: Validate catalog against disk
-        shell: bash
-        run: |
-          cat > "${RUNNER_TEMP}/check.mjs" <<'CHECK'
-          import { readFileSync, readdirSync, existsSync } from 'node:fs'
-          import { join } from 'node:path'
-
-          const ROOT = process.cwd()
-          const CATALOG = '.claude-plugin/marketplace.json'
-          const SOURCE_RE = /^\.\/plugins\/([^./][^/]*)$/
-          const errors = []
-          const dirs = (p) =>
-            existsSync(p)
-              ? readdirSync(p, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
-              : []
-
-          const catalog = JSON.parse(readFileSync(join(ROOT, CATALOG), 'utf8'))
-          const entries = Array.isArray(catalog.plugins) ? catalog.plugins : []
-          const listed = new Set()
-          const seenNames = new Set()
-          const seenDirs = new Set()
-
-          for (const entry of entries) {
-            const name = entry?.name ?? 'unnamed'
-            if (seenNames.has(name)) {
-              errors.push(`${CATALOG}: duplicate plugin name "${name}"`)
-            } else {
-              seenNames.add(name)
-            }
-
-            const source = String(entry?.source ?? '')
-            const match = SOURCE_RE.exec(source)
-            if (source.includes('..') || !match) {
-              errors.push(`${CATALOG} ${name}: source "${source}" must be "./plugins/<name>"`)
-              continue
-            }
-            const dirName = match[1]
-            if (seenDirs.has(dirName)) {
-              errors.push(`${CATALOG}: duplicate source "${source}"`)
-              continue
-            }
-            seenDirs.add(dirName)
-            listed.add(dirName)
-
-            const dir = join(ROOT, source)
-            const manifest = join(dir, '.claude-plugin', 'plugin.json')
-            if (!existsSync(manifest)) {
-              errors.push(`${CATALOG} ${name}: "${source}" has no .claude-plugin/plugin.json`)
-              continue
-            }
-            const declared = JSON.parse(readFileSync(manifest, 'utf8')).name
-            if (declared !== name) {
-              errors.push(`${source}/.claude-plugin/plugin.json: name "${declared}" != catalog entry "${name}"`)
-            }
-
-            const skills = dirs(join(dir, 'skills'))
-            if (skills.length === 0) {
-              errors.push(`${source}: no skills, so this plugin installs but does nothing`)
-            }
-            for (const skill of skills) {
-              if (!existsSync(join(dir, 'skills', skill, 'SKILL.md'))) {
-                errors.push(`${source}/skills/${skill}: no SKILL.md - this skill does not exist to Claude`)
-              }
-            }
-          }
-
-          for (const dir of dirs(join(ROOT, 'plugins'))) {
-            if (!listed.has(dir)) {
-              errors.push(`${CATALOG}: plugins/${dir} is in the repo but listed by no entry, so it never ships`)
-            }
-          }
-
-          for (const e of errors) console.log(`  ERROR  ${e}`)
-          if (errors.length) {
-            console.log(`\n${errors.length} error(s). Not ready to publish.`)
-            process.exit(1)
-          }
-          console.log(`${entries.length} plugin(s) OK.`)
-          CHECK
-          node "${RUNNER_TEMP}/check.mjs"

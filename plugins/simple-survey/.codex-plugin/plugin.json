@@ -1,9 +1,8 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "simple-survey",
   "version": "0.1.0",
-  "displayName": "Simple Survey",
   "description": "Skills for working with Simple Survey in Salesforce.",
+  "skills": "./skills/",
   "author": {
     "name": "Vicasso",
     "url": "https://vicasso.com"
@@ -17,5 +16,12 @@
     "service-cloud",
     "surveys",
     "simple-survey"
-  ]
+  ],
+  "interface": {
+    "displayName": "Simple Survey",
+    "shortDescription": "Analyze Salesforce survey responses, NPS, CSAT, and CES.",
+    "developerName": "Vicasso",
+    "category": "Productivity",
+    "websiteURL": "https://vicasso.com"
+  }
 }

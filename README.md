@@ -67,15 +67,30 @@ Skills are organized under their corresponding Vicasso apps. Each skill is store
 ```text
 vicasso-skills/
 ├── .claude-plugin/
-│   └── marketplace.json
+│   └── marketplace.json          # Claude Code marketplace
+├── .agents/
+│   └── plugins/
+│       └── marketplace.json      # Codex marketplace
 ├── plugins/
 │   └── <app-slug>/
+│       ├── plugin.json           # Agent Plugins v1, vendor-neutral
+│       ├── .claude-plugin/
+│       │   └── plugin.json       # Claude Code
+│       ├── .codex-plugin/
+│       │   └── plugin.json       # Codex
 │       └── skills/
 │           └── <skill-slug>/
 │               └── SKILL.md
+├── scripts/                      # Repository validation
 ├── LICENSE
 └── README.md
 ```
+
+One copy of every skill serves every platform. The `SKILL.md` files stay inside
+the [Agent Skills](https://agentskills.io/specification) specification — no
+vendor-specific frontmatter — and each platform gets its own thin manifest
+alongside them, including the vendor-neutral
+[Agent Plugins](https://agent-plugins.org/specification) manifest.
 
 Each published skill directory will contain a `SKILL.md` file and any supporting resources required by that skill.
 
@@ -135,9 +150,37 @@ Team and Enterprise owners can distribute Vicasso Skills to all users:
 
 Installing Vicasso Skills through the marketplace makes it easy to stay current as Vicasso publishes improvements.
 
-### Other AI platforms
+### OpenAI Codex and ChatGPT
 
-Setup instructions for other AI platforms will be added. You can also download the complete skill directory, including its `SKILL.md` file, and manually add it to your AI platform. Manually installed skills will not receive updates automatically.
+Codex installs plugins from a marketplace, the same model as Claude.
+
+1. Add this repository as a marketplace:
+
+   ```
+   codex plugin marketplace add VicassoAI/vicasso-skills
+   ```
+
+2. Run `/plugins` in Codex, browse the Vicasso marketplace, and install the plugins you want.
+3. Start a new session before using the installed skills.
+
+Run `codex plugin marketplace upgrade` to pick up newly published Vicasso skills.
+
+### GitHub Copilot, Cursor, and individual skills
+
+`gh skill` (GitHub CLI 2.90.0 or later) installs one skill at a time into any supported agent:
+
+```
+gh skill install VicassoAI/vicasso-skills case-flags-analyst --agent cursor --scope user
+```
+
+`--agent` selects the target agent. GitHub Copilot, Claude Code, Cursor, Codex, Gemini CLI, and Antigravity are all supported targets, so this also works as a per-skill alternative to the marketplace installs above. Run `gh skill install --help` for the exact agent names.
+
+`--scope user` installs the skill for yourself across all projects; repository scope instead commits the skill into the current repository, so teammates pick it up with a normal `git pull`. Pin a version with `case-flags-analyst@v0.1.0`, and apply updates later with `gh skill update --all`.
+
+### Manual installation
+
+You can also download a skill directory, including its `SKILL.md` file and supporting resources, and place it in your agent's skills directory. Manually installed skills will not receive updates automatically.
+
 ## Using Vicasso skills
 
 Before using a Vicasso Skill, make sure Salesforce MCP is configured, connected, and authenticated for your Salesforce org.

@@ -1,8 +1,7 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "case-flags",
   "version": "0.1.0",
-  "displayName": "Case Flags",
   "description": "Skills for working with Case Flags in Salesforce.",
   "author": {
     "name": "Vicasso",

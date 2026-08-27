@@ -1,9 +1,8 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "case-flags",
   "version": "0.1.0",
-  "displayName": "Case Flags",
   "description": "Skills for working with Case Flags in Salesforce.",
+  "skills": "./skills/",
   "author": {
     "name": "Vicasso",
     "url": "https://vicasso.com"
@@ -17,5 +16,12 @@
     "service-cloud",
     "case-management",
     "case-flags"
-  ]
+  ],
+  "interface": {
+    "displayName": "Case Flags",
+    "shortDescription": "Prioritize, triage, and analyze flagged Salesforce cases.",
+    "developerName": "Vicasso",
+    "category": "Productivity",
+    "websiteURL": "https://vicasso.com"
+  }
 }

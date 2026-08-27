@@ -1,0 +1,32 @@
+{
+  "name": "vicasso",
+  "interface": {
+    "displayName": "Vicasso Skills"
+  },
+  "plugins": [
+    {
+      "name": "case-flags",
+      "source": {
+        "source": "local",
+        "path": "./plugins/case-flags"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "simple-survey",
+      "source": {
+        "source": "local",
+        "path": "./plugins/simple-survey"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

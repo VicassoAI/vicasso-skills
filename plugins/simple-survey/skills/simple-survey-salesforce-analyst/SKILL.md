@@ -1,5 +1,6 @@
 ---
 name: simple-survey-salesforce-analyst
+license: Apache-2.0
 compatibility: Requires a connected Salesforce MCP server with read access to the Simple Survey managed package (simplesurvey__).
 description: Understand and analyze Simple Survey data stored in Salesforce. Use this skill whenever someone asks questions about survey responses, NPS scores, CSAT, CES, team or agent feedback, customer sentiment, account sentiment, product feedback trends, or coaching and review preparation — even if they do not explicitly mention Simple Survey. Triggers include requests to summarize feedback for a team, assess how an agent is doing, prepare for a quarterly review, find out what customers think about a product or service, or identify trends in survey data. Always use this skill when the Salesforce MCP is in play and the question involves survey responses or scores.
 ---

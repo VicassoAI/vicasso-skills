@@ -1,13 +1,16 @@
-![Vicasso Logo](https://cdn.prod.website-files.com/60fb23dfe1da5e6c58b78467/65a692ad7624a0885e247d62_Vicasso-logo-Color-white-teal-text-WeAccelerateService-300px-wide.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://cdn.prod.website-files.com/60fb23dfe1da5e6c58b78467/65a692ad7624a0885e247d62_Vicasso-logo-Color-white-teal-text-WeAccelerateService-300px-wide.png">
+  <img alt="Vicasso logo" src="https://cdn.prod.website-files.com/60fb23dfe1da5e6c58b78467/67900a435efe625e37952dd3_Vicasso-logo-Color-dark.svg" width="300">
+</picture>
 
 # Vicasso Skills
 
-**Bring better Salesforce case operations into every AI conversation.**
+**Manage your Salesforce case operations from any AI conversation.**
 
-Vicasso Skills are reusable [Agent Skills](https://agentskills.io/) for headless Salesforce service operations performed through AI assistants such as Claude rather than exclusively in the Salesforce UI. Used with Salesforce MCP, they give authorized users the app-specific context and instructions needed to retrieve and interpret case management data and execute Vicasso-powered workflows.
+Vicasso Skills are reusable [Agent Skills](https://agentskills.io/) for headless Salesforce service operations performed through AI assistants such as Claude. Used with Salesforce MCP, they give authorized users the app-specific context and instructions needed to retrieve and interpret case management data and execute Vicasso-powered workflows.
 
 > [!NOTE]
-> **Preview:** Vicasso Skills are being published incrementally. Watch this repository for updates, or star it to bookmark it.
+> **Preview:** Vicasso Skills are being published incrementally. Watch and Star this repository for updates.
 
 ## What Vicasso Skills can help you do
 

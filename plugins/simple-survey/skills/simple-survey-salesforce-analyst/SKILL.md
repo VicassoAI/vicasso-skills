@@ -2,7 +2,7 @@
 name: simple-survey-salesforce-analyst
 license: Apache-2.0
 compatibility: Requires a connected Salesforce MCP server with read access to the Simple Survey managed package (simplesurvey__).
-description: Understand and analyze Simple Survey data stored in Salesforce. Use this skill whenever someone asks questions about survey responses, NPS scores, CSAT, CES, team or agent feedback, customer sentiment, account sentiment, product feedback trends, or coaching and review preparation — even if they do not explicitly mention Simple Survey. Triggers include requests to summarize feedback for a team, assess how an agent is doing, prepare for a quarterly review, find out what customers think about a product or service, or identify trends in survey data. Always use this skill when the Salesforce MCP is in play and the question involves survey responses or scores.
+description: Understand and analyze Simple Survey data stored in Salesforce. Use this skill whenever someone asks questions about survey responses, NPS scores, CSAT, CES, team or agent feedback, customer sentiment, account sentiment, product feedback trends, or coaching and review preparation — even if they do not explicitly mention Simple Survey. Triggers include requests to summarize feedback for a team, assess how an agent is doing, prepare for a quarterly review, find out what customers think about a product or service, identify trends in survey data, calculate per-question averages, or explain why report averages don't match Survey Insights. Always use this skill when the Salesforce MCP is in play and the question involves survey responses or scores.
 ---
 
 # Simple Survey Salesforce Analyst
@@ -152,6 +152,7 @@ Simple Survey blocks survey record creation when the Human Confidence Score fall
 
 ### How to Handle This in Analysis
 
+- **Records with no score (NULL):** Bot prevention wasn't enabled when they were created. Keep them. Write the exclusion as `simplesurvey__Human_Confidence_Score__c != 0` (which keeps NULL rows in SOQL), not `> 0` (which drops them).
 - **Score = 0 (likely bot):** Exclude from analysis the same way you exclude `simplesurvey__Is_Test_Survey__c = true` records — but call out the count/presence of excluded bot-suspect records when reporting results, so the user knows data was filtered.
 - **Negative scores (connection/config errors):** Treat as a separate data-quality issue, not a bot signal. Exclude them from score analysis too (an unverifiable record shouldn't count either way), but report them separately from the bot-suspect count — e.g., "N records excluded as likely bots (score = 0), M records excluded due to reCAPTCHA verification errors (negative score)." If the negative-score count is notable, flag it as a possible configuration problem worth raising with an admin, rather than a data-quality issue with the survey responses themselves.
 - **Score close to but not exactly 0, or between 0 and 1:** Treat as human unless the user indicates their org's bot threshold is set higher than 0 — ask if unsure.
@@ -206,6 +207,52 @@ The initial question is open-ended, not a rating. `simplesurvey__Survey_Score__c
 
 ---
 
+## Averaging Scores Correctly — N/A (-1) and Skipped (NULL) Answers
+
+Any time you calculate an average from a rating question, two kinds of values are **not answers** and must stay out of both the numerator and the denominator:
+
+| Stored value | Meaning | Why it's stored that way |
+|---|---|---|
+| `-1` | Respondent chose **N/A** | Intentional — keeps "not applicable" distinguishable from "skipped" |
+| blank (NULL) | Question was **skipped** (by the respondent or by Skip Logic) or never reached | No answer was given |
+
+This matters because it's a known source of mismatched numbers. Standard Salesforce report averages include `-1` as a real score and treat blanks as zero, so both drag averages down. Simple Survey's **Survey Insights** excludes them and gets it right. When customers compare the two, the report looks worse. Your numbers should match Survey Insights, not the standard report. If someone asks why their report average doesn't match Survey Insights, this is almost certainly the reason — explain it.
+
+### Rules for a correct per-question average
+
+1. **Average each question independently.** A respondent who answered N/A to Q2 still gave a real answer to Q1 and Q3, and those must count. Never drop a whole survey row because one question on it is `-1` or blank — that's exactly the failure standard reports hit when you filter them.
+2. **Valid answers only:** a value counts if it is not NULL and not `-1`. The average is the sum of valid answers ÷ the count of valid answers *for that question* — not ÷ the number of survey records.
+3. **Zero is a real answer.** On 0–10 scales (NPS, Medical Pain, Wong-Baker) and Thumbs Up/Down (0 = Thumbs Down), `0` is a legitimate response. Never exclude zeros, and never turn blanks into zeros.
+4. **Report the excluded counts** next to each average — e.g., "Avg 4.3 (n=112; 9 N/A, 14 skipped)." N/A rate and skip rate are useful signals on their own (a question many people mark N/A may not fit the audience).
+5. **If a question has no valid answers, say so.** When every answer to a question is N/A or skipped, report "no valid answers" with the N/A and skipped counts. Don't show 0, don't show -1, and don't silently drop the question from the results, because each of those tells the reader something false.
+6. **Flag averages built on very few answers.** Excluding N/A and skipped answers can leave a question with only a handful of real ones, even when the survey count looks healthy. As a rule of thumb, when n is under 5, show the average but label it as a small sample (e.g., "5.0, n=1 — too few answers to draw conclusions"). This matters most for per-agent breakdowns and coaching reviews, where one answer can make an agent look excellent or poor.
+
+### How to compute it in SOQL
+
+SOQL's `AVG()` and `COUNT(field)` already ignore NULLs (verified against this org: `AVG` equals `SUM` ÷ `COUNT(field)`, not `SUM` ÷ `COUNT(Id)`). They do **not** ignore `-1`. So run one aggregate query per question, with that question's own exclusion in the WHERE clause — because each query covers one question, the filter can't remove answers to other questions:
+
+```sql
+SELECT AVG(Q1_Rating__c) avgQ1, COUNT(Q1_Rating__c) nQ1
+FROM simplesurvey__Survey__c
+WHERE simplesurvey__Is_Test_Survey__c = false
+  AND simplesurvey__Status__c IN ('Responded','Partial','Completed')
+  AND Q1_Rating__c != -1
+  -- plus your date / program / agent filters
+```
+
+Get the N/A and skipped counts with `COUNT(Id)` where the field `= -1` and where it `= null`. `!= -1` keeps NULL rows in SOQL, but `AVG`/`COUNT(field)` ignore them anyway.
+
+If you pull raw rows and compute in code instead, handle each column separately: drop NULL and `-1` per column, and never fill NULL with 0 or drop rows that are missing *any* question (e.g., avoid a row-wide `dropna()` or `fillna(0)` in pandas).
+
+### Which fields this applies to
+
+- **Custom rating question fields** — org-specific number fields where a survey program stores answers to its landing-page rating questions. Find them with `getObjectSchema`; the field's help text or description is usually the question text. Apply these rules to every one of them.
+- **`simplesurvey__Survey_Score__c`** — apply the same exclusions defensively. Most programs won't store `-1` here, but excluding it costs nothing.
+- **Do NOT apply to `simplesurvey__NPS_Factor__c`.** Its `-1` means Detractor and is a real value; excluding it would inflate NPS. For NPS, only exclude records where the factor is NULL.
+- **Do NOT apply to `simplesurvey__Human_Confidence_Score__c`.** Its negative values are reCAPTCHA error codes, handled in the Bot Detection section.
+
+---
+
 ## Ownership & Visibility
 
 Simple Survey uses a deliberate two-level ownership model.
@@ -253,6 +300,10 @@ Survey records do not include a direct lookup field to the survey program config
 
 When a user asks about "our Case NPS program" or similar, clarify which of these identifiers applies in their org before running the query.
 
+---
+
+## The Snapshot Field
+
 `simplesurvey__Snapshot__c` is a **rich text (HTML) field** that stores the complete survey response exactly as the respondent experienced it — all questions and answers in one place.
 
 **When to use it:**
@@ -287,12 +338,14 @@ When a user asks about "our Case NPS program" or similar, clarify which of these
 - Exclude test records
 - Group by `simplesurvey__Record_Owner__r.Name` for per-agent breakdown
 - For NPS: `AVG(simplesurvey__NPS_Factor__c) × 100` per agent
+- For CSAT, CES, Likert, or custom rating questions: average each question separately, excluding N/A (`-1`) and skipped (NULL) answers per question — see Averaging Scores Correctly
 - Surface score distribution and notable comments from Snapshot or Survey Comments
 
 ### Individual Coaching / Quarterly Review
 *"Help me prepare a quarterly review for [agent]"*
 - Filter to `simplesurvey__Record_Owner__r.Name = '[Agent Name]'`
 - Look at score trends over time, not just averages — directional change matters
+- When averaging any rating question, exclude N/A (`-1`) and skipped (NULL) answers per question, and note how many were excluded
 - For NPS programs: identify Detractor responses and read Snapshots to understand each situation
 - Highlight Promoter examples as positive coaching evidence
 - Extract recurring themes from free-text comments to inform actionable feedback
@@ -324,6 +377,7 @@ When a user asks about "our Case NPS program" or similar, clarify which of these
 - **Responded ≠ full response.** Records with Status = 'Responded' only have the initial score. Comments and landing page questions will be empty.
 - **Record Owner ≠ Salesforce Owner.** These are different users. Use Record Owner to find an agent's surveys; Salesforce Owner reflects management hierarchy.
 - **No direct link from Survey to Survey Configuration.** If diagnosing a program-level issue (inactive program, auto-create settings), you have to match the Configuration record by `Survey_Object__c`/Record Type/Name — confirm with the user rather than assuming a match.
+- **N/A is stored as -1 and skipped as NULL.** Exclude both per question when averaging, never per row, and never count blanks as zero. This is why standard report averages come out lower than Survey Insights. The exception is NPS Factor, where `-1` means Detractor and must be kept.
 - **Always filter out test records.** `simplesurvey__Is_Test_Survey__c = false`
 - **Also filter out likely-bot records where bot prevention is enabled.** `simplesurvey__Human_Confidence_Score__c = 0` records are suspected bots and should be excluded like test records (but call out the count). Negative scores are verification errors, not bots — exclude from scoring but report separately.
 - **Snapshot is HTML.** Strip tags before text analysis.

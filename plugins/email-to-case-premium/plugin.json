@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "email-to-case-premium",
+  "version": "0.1.0",
+  "description": "Skills for working with Email to Case Premium in Salesforce.",
+  "author": {
+    "name": "Vicasso",
+    "url": "https://vicasso.com"
+  },
+  "homepage": "https://vicasso.com/products/email-to-case-premium",
+  "repository": "https://github.com/VicassoAI/vicasso-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "vicasso",
+    "salesforce",
+    "service-cloud",
+    "email-to-case",
+    "email-to-case-premium"
+  ]
+}

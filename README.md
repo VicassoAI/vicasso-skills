@@ -100,6 +100,7 @@ Each published skill directory will contain a `SKILL.md` file and any supporting
 Vicasso currently provides skills for:
 
 - [Case Flags](/plugins/case-flags/skills/)
+- [Email to Case Premium](/plugins/email-to-case-premium/skills/)
 - [Simple Survey](/plugins/simple-survey/skills/)
 
 ## Prerequisites

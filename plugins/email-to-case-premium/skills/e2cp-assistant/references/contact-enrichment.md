@@ -36,6 +36,8 @@ When the contact is in the Default Account, the skill may suggest the matching A
 
 Skip voicemail alerts, no-reply addresses, and shared mailboxes; mention them instead of enriching. Out-of-office auto-replies are not departures.
 
+The org's own support addresses (see `replying.md`, "Support addresses are never recipients") are never contacts: don't enrich them, suggest them as the Case Contact, or match accounts by them.
+
 ## Reachability
 
 Call out a person who can't receive email, quoting the evidence. Signals:

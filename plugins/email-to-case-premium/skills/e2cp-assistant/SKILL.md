@@ -125,7 +125,7 @@ The core job. Two requests share one read of the case.
    - questions they asked that no reply has answered
    - commitments we made and haven't met
    - asks for something they already gave
-   - changes in who's on the thread (a manager newly copied, the original contact gone quiet)
+   - changes in who's on the thread (a manager newly copied, the original contact gone quiet); the org's own support addresses don't count
    - how long they've waited for us
    - draft text that contradicts what a colleague or article told them
    - other open cases from the account, or a matching Widespread Issue
@@ -209,6 +209,7 @@ These apply only when the other product is installed.
 - **Classify comments by IsPublished and CreatedBy, not by header.** Headers depend on org settings and are absent when recipients aren't shown in comments.
 - **CommentBody is truncated.** Read `CommentBodyRichText`.
 - **Send Response has no recipient parameter.** To add someone, update the Case's Additional To / CC / BCC fields (or add a Case Team Member) first.
+- **The org's support addresses are never recipients or contacts.** They appear on every inbound email; adding one sends E2CP a copy of its own reply. See `references/replying.md`.
 - **A sent reply can email no one.** With no default recipients (or `EMAIL_NOTIFICATION` off), Send Response only adds a comment. Check before sending.
 - **Send Response doesn't check Comment Only Mode.** The skill must.
 - **body and cannedResponseId are mutually exclusive.** Passing both throws an error.

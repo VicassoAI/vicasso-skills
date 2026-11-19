@@ -25,14 +25,14 @@ Field sets (including the New Comment Page field set) can't be read through the 
 
 | Setting | What it changes | Inferred from data when unreadable |
 |---|---|---|
-| `ENABLE_CASE_FEED_EXTENSION` | `true` = Inbound Specific layout. Say the skill supports the Standard layout only, and stop | Ask the user |
+| `ENABLE_CASE_FEED_EXTENSION` | `true` = Inbound Specific layout. Say the skill supports the Standard layout only, and stop | Case Comments created by E2CP's inbound automation user exist: Standard layout. None at all: ask the user |
 | `ENABLE_HTML_SUPPORT` | Rich-text comments. Off: Canned Responses use `Comment__c`, not `Comment_HTML__c` | Rich-text comment fields are populated |
 | `ENABLE_CANNED_COMMENTS` | Canned Responses on or off | Active Canned Responses exist |
-| `DRAFT_COMMENTS` | Draft Comments on or off. Send Response doesn't check it | Draft records exist |
+| `DRAFT_COMMENTS` | Draft Comments on or off. Send Response doesn't check it, so check it before offering or saving a draft | Draft records exist |
 | `EMAIL_NOTIFICATION` | Whether default recipients are pre-selected. Off: a public send emails nobody | Ask the user |
 | `ENABLE_COMMENT_ONLY_MODE` | Comment Only Mode. Send Response doesn't check it; the skill must | Ask the user |
 | `USE_SIGNATURE` | Salesforce appends the agent's signature. On: don't write a signature block | Ask the user |
-| `PRIVATE_COMMENT_DOMAINS` (list) | Internal Domains: the only domains private replies are emailed to | No data signal. Treat as empty until read or confirmed |
+| `PRIVATE_COMMENT_DOMAINS` (list) | Internal Domains: the only domains private replies are emailed to | No data signal. Before the first private reply that should email someone, ask the user for the list (an empty answer is valid) and save it. Don't assume it's empty |
 | `IGNORE_INTERNAL_SUBDOMAINS` | Lets subdomains of Internal Domains match | Ask the user |
 | `PKB_BASE_URL` | Base URL for `{$KnowledgeLinks}` (or the case's `Knowledge_Base_URL__c`). Neither: links start with the text "null" | Ask the user |
 | `PKB_ALL_LINKS` | Includes internal-only articles in `{$KnowledgeLinks}` | Ask the user |

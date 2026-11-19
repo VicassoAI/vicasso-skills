@@ -33,7 +33,7 @@ Reference files, read when the job needs them:
 
 1. **Settings.** Read the E2CP settings the job needs from `E2CP__casepref__c`. If the query is refused (orgs that restrict access to custom settings need it granted), infer each setting from data, show the user what was inferred, confirm once, save the confirmed values in Claude's memory for this org, and tell the user which access their admin can grant. See `references/settings.md`.
 2. **Layout.** If the org uses the Inbound Specific layout (`ENABLE_CASE_FEED_EXTENSION = true`), there are no Case Comments to work from. Say the skill supports the Standard layout only, and stop.
-3. **Version.** The rules here describe Email to Case Premium 10.24 or later. If the org runs an older version, tell the user that some steps (sending, drafts, field updates) may not behave as described, and recommend upgrading.
+3. **Version.** The rules here describe Email to Case Premium 10.24 or later. The Salesforce MCP usually can't read installed package versions, so unless Claude's memory already has it for this org, ask the user once (Setup → Installed Packages shows it) and save the answer. If the org runs an older version, tell the user that some steps (sending, drafts, field updates) may not behave as described, and recommend upgrading.
 4. **Send Response.** Before offering to send, save a draft, or add a Timeline update, check that the E2CP Send Response action is among this session's tools. A connection that can read and edit records can't always run invocable actions. If it's missing, say so up front, and tell the user how to fix it: ask their Salesforce admin to add the E2CP Send Response Apex action (`E2CP.InvocableSend.send`) to the Salesforce MCP server they connect through. Until then, the skill can still catch the agent up and write the reply, and offers the final text in chat for the agent to paste into the New Comment Page. Never work around it by inserting a draft or comment record directly.
 5. **Org-specific values** (automation user names, custom field names, field sets, library sizes) are discovered at run time. Never assume them.
 
@@ -62,8 +62,8 @@ Every piece of text the skill writes is either **customer-facing** (a public sen
 
 Customer-facing text never contains internal links or record Ids:
 
-- No `*.force.com` or `*.salesforce.com` URLs, no `/lightning/` paths, no 15- or 18-character record Ids.
-- Public file links (`/sfc/p/`) and public file delivery links (`/sfc/dist/`, such as images embedded in a Canned Response) are meant for customers and are allowed.
+- No `*.force.com` or `*.salesforce.com` URLs, no `/lightning/` paths, and no Salesforce record Ids (15 or 18 characters, starting with a known object key prefix such as `500` for Case or `003` for Contact). Order numbers, serial numbers, and other customer-supplied strings aren't record Ids.
+- **Exception:** public file links (`/sfc/p/`) and public file delivery links (`/sfc/dist/`, such as images embedded in a Canned Response) are meant for customers. They're allowed even though they sit on a `*.force.com` domain and contain Ids; leave them out of the scan.
 - Name people and records in plain text.
 - Knowledge goes out only through `{$KnowledgeLinksExternal}` or public article URLs.
 

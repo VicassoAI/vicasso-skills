@@ -7,7 +7,7 @@ Covers every person who has emailed into the case, not only the original sender.
 ## Finding Auto-Created Contacts
 
 - An auto-created contact has the Description "Automatically created by Email to Case Premium" and often sits in the Default Account (`EXTERNAL_CONTACT_ACCOUNT`).
-- E2CP also auto-creates contacts for colleagues on To/CC. **Flag those instead of enriching them.**
+- E2CP also auto-creates contacts for colleagues on To/CC. **Flag those instead of enriching them.** A colleague is someone whose email domain matches the email domain of an active Salesforce user in the org.
 - When the case has no Contact but an auto-created contact matches the sender's address ignoring case (a sender address with capital letters can leave the contact unlinked), offer to set it as the Case Contact.
 
 ## Sources, Best First
@@ -48,7 +48,7 @@ Call out a person who can't receive email, quoting the evidence. Signals:
 
 For an unreachable person, **fix the case only**, with the agent's confirmation:
 
-- Remove them from Additional To / CC and the Case Team.
+- Remove them from Additional To / CC and the Case Team. Removing a Case Team Member deletes its CaseTeamMember record; if the connection can't delete records, tell the agent to remove them from the Case Team on the case page.
 - If they were the Case Contact and someone else was named, suggest that person (an existing contact, or a new one the agent approves).
 - If they were the only recipient, warn that a sent reply would be added as a comment with no email going out.
 

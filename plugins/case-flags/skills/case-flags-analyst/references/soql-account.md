@@ -9,14 +9,25 @@ concentration, and the compare-to-normal baseline.
 ## 10. Account responsiveness (Job H) — two-sided, rolled up to Account
 
 CFHT has no Account field; it is master-detail to Case, so the account rollup joins through the parent case
-via `FLAGS__Case__r.AccountId`. `{AID}` = the account (or IN-list of parent + children, §10.1); `{CF_SCOPE}`
-= `AND FLAGS__Case__r.FLAGS__Enable_Case_Flags__c = true` in selective orgs, empty otherwise. All BH figures
+via `FLAGS__Case__r.AccountId`. `{AID}` = the account (or IN-list of parent + children, §10.1). Two scope
+placeholders, because the path differs by object:
+- `{CF_SCOPE_CFHT}` (queries FROM CFHT) = `AND FLAGS__Case__r.FLAGS__Enable_Case_Flags__c = true` in
+  selective orgs, empty otherwise.
+- `{CF_SCOPE}` (queries FROM Case) = the standard form from `references/soql-preflight.md`
+  (`AND FLAGS__Enable_Case_Flags__c = true`).
+
+Using the CFHT form on a Case query fails with "Didn't understand relationship 'FLAGS__Case__r'"
+(verified live). SOQL has no comment syntax, so the queries below contain none; notes sit outside the
+blocks. All BH figures
 require `FLAGS__Business_Hours_Elapsed__c` in the SELECT (silent-zero — see `references/field-reference.md`).
 
 **10.1 Resolve account (and optional hierarchy):**
 ```sql
 SELECT Id, Name, ParentId FROM Account WHERE Name LIKE '%{TERM}%'
--- if rolling up a parent's children (ask first):
+```
+`{TERM}` is the user's account name with any `'` escaped as `\'`. To roll up a parent's children
+(ask first):
+```sql
 SELECT Id, Name FROM Account WHERE Id = '{AID}' OR ParentId = '{AID}'
 ```
 Use `AccountId IN (...)` / `FLAGS__Case__r.AccountId IN (...)` below when the hierarchy is rolled up.
@@ -28,7 +39,7 @@ SELECT FLAGS__Flag_Set__c, COUNT(Id) intervals,
        AVG(FLAGS__Business_Hours_Elapsed__c) avg_bh
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__r.AccountId = '{AID}'
-  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Flag_Set__c
 ```
 `true` row = our court (how they experienced us); `false` row = their court (how responsive they were).
@@ -36,19 +47,21 @@ Means only — medians need raw values (§10.3, §10.6).
 
 **10.3 Ongoing-response median (our court, run-based, method (a) — accurate):** account-scoped versions of
 the two `references/field-reference.md` "Ongoing-response" queries:
+Per-case flag-up BH sum:
 ```sql
--- per-case flag-up BH sum
 SELECT FLAGS__Case__c, SUM(FLAGS__Business_Hours_Elapsed__c) up_bh
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__r.AccountId = '{AID}' AND FLAGS__Flag_Set__c = true
-  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Case__c
--- per-case genuine-clear count (exclude Case Closed housekeeping)
+```
+Per-case genuine-clear count (excludes the Case Closed housekeeping clear):
+```sql
 SELECT FLAGS__Case__c, COUNT(Id) clears
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__r.AccountId = '{AID}' AND FLAGS__Event__c = 'Flag Cleared'
   AND FLAGS__Action__c != 'Case Closed'
-  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Case__c
 ```
 per-case mean = up_bh ÷ clears (skip 0-clear cases); the read is the **median of the per-case means**.
@@ -69,7 +82,7 @@ the case, grouped by account — one query per level:
 SELECT FLAGS__Case__r.AccountId aid, COUNT_DISTINCT(FLAGS__Case__c) cases
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__r.AccountId = '{AID}' AND FLAGS__Flag_Level_BH__c = 'L4'
-  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Case__r.AccountId
 ```
 Swap `'L4'` for `'L3'` for the red count. Report **both**: L4 is the breach (SLA blown), but on fast-response
@@ -81,18 +94,20 @@ actual cases, take the `FLAGS__Case__c` ids from a non-grouped version and resol
 **10.6 Worst wait + customer-court turnaround (raw pull, profile mode):** small per-account volume, so pull
 raw and compute in code:
 ```sql
-SELECT FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Flag_Set__c,
+SELECT FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Case_Flag_History_Number__c, FLAGS__Flag_Set__c,
        FLAGS__Start__c, FLAGS__End__c, FLAGS__Event__c, FLAGS__Action__c,
        FLAGS__Business_Hours_Elapsed__c
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__r.AccountId = '{AID}'
-  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 ORDER BY FLAGS__Case__c ASC, FLAGS__Start__c ASC
 ```
 `CaseNumber` is fine in this **detail** (non-aggregate) query — the grouping restriction only bites in
 aggregate queries. Worst wait = longest contiguous `Flag_Set = true` **run** (stitch runs; a per-interval
 MAX understates a split cycle). Customer turnaround = median of `Flag_Set = false` interval BH **excluding**
-rows with `FLAGS__Action__c = 'Case Closed'` (the post-resolution dwell); their worst gap = max of that set.
+rows with `FLAGS__Action__c = 'Case Closed'` (the post-resolution dwell) and the closed-gap rows that follow
+a close (pull `FLAGS__Case_Flag_History_Number__c` and walk each case in order; `scripts/age_decompose.py`
+identifies both); their worst gap = max of that set.
 
 **10.7 Currently in their court (snapshot, no window):** open cases for the account with no flag up now:
 ```sql
@@ -108,8 +123,19 @@ SELECT FLAGS__Case__r.AccountId, FLAGS__Flag_Set__c,
        COUNT(Id) intervals, AVG(FLAGS__Business_Hours_Elapsed__c) avg_bh
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Start__c = LAST_N_DAYS:90
-  AND FLAGS__Case__r.AccountId != null {CF_SCOPE}
+  AND FLAGS__Case__r.AccountId != null {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Case__r.AccountId, FLAGS__Flag_Set__c
+```
+**Roster concentration flag.** The grouped query above has no per-case detail, so the "one case drives
+it" flag needs this per-case companion (verified live). Run it once per side (`Flag_Set` true or false).
+In code, per account, compute top case ÷ account total and compare it with the concentration bar in
+SKILL.md:
+```sql
+SELECT FLAGS__Case__r.AccountId aid, FLAGS__Case__c, SUM(FLAGS__Business_Hours_Elapsed__c) bh
+FROM FLAGS__Case_Flags_History_Tracking__c
+WHERE FLAGS__Flag_Set__c = true AND FLAGS__Start__c = LAST_N_DAYS:90
+  AND FLAGS__Case__r.AccountId != null {CF_SCOPE_CFHT}
+GROUP BY FLAGS__Case__r.AccountId, FLAGS__Case__c
 ```
 Resolve `AccountId → Name` in a second `SELECT Id, Name FROM Account WHERE Id IN (...)`. Grouping one
 relationship hop deep on `FLAGS__Case__r.AccountId` is **verified to work**; the fall back (group by
@@ -126,7 +152,7 @@ SELECT FLAGS__Case__c, SUM(FLAGS__Business_Hours_Elapsed__c) total,
        COUNT(Id) ints, MAX(FLAGS__Business_Hours_Elapsed__c) max_int
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__r.AccountId = '{AID}' AND FLAGS__Flag_Set__c = true
-  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Case__c
 ORDER BY SUM(FLAGS__Business_Hours_Elapsed__c) DESC
 ```
@@ -143,17 +169,22 @@ From the returned rows (one per case), in code:
 
 **10.10 Compare to normal (opt-in, our-court ONLY).** "Normal" = the org's own baseline over the SAME window,
 computed the SAME way, so it's apples-to-apples. Never benchmark the customer-court side. Two org figures:
+ongoing_normal numerator and denominator (pooled per cycle). To exclude the target account, add
+`AND FLAGS__Case__r.AccountId != '{AID}'`:
 ```sql
--- ongoing_normal numerator + denominator (pooled per-cycle):
 SELECT SUM(FLAGS__Business_Hours_Elapsed__c) up_sum, COUNT(Id) up_ints
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Flag_Set__c = true AND FLAGS__Start__c = LAST_N_DAYS:90
-  AND FLAGS__Case__r.AccountId != null {CF_SCOPE}      -- add AND FLAGS__Case__r.AccountId != '{AID}' to exclude the target
--- ...and org genuine clears (same WHERE as §10.3 clears, minus the AccountId filter)
--- initial_normal:
+  AND FLAGS__Case__r.AccountId != null {CF_SCOPE_CFHT}
+```
+Then the org's genuine clears: the same WHERE as the §10.3 clears query, minus the AccountId filter.
+
+initial_normal, windowed on `FLAGS__Initial_Response__c` exactly like the account's own §10.4 figure
+(windowing one on response date and the other on creation date would break "computed the SAME way"):
+```sql
 SELECT AVG(FLAGS__Initial_Response_Business_Hours__c) avg_ir, COUNT(Id) n
 FROM Case
-WHERE FLAGS__Initial_Response__c != null AND CreatedDate = LAST_N_DAYS:90
+WHERE FLAGS__Initial_Response__c != null AND FLAGS__Initial_Response__c = LAST_N_DAYS:90
   AND AccountId != null {CF_SCOPE}
 ```
 `ongoing_normal = up_sum ÷ org_clears`; `initial_normal = avg_ir`. Compare **account mean vs org mean** on

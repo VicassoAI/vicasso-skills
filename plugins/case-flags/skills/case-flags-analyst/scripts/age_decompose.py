@@ -57,6 +57,7 @@ from datetime import datetime, timezone
 
 from cfa_common import (
     DataError,
+    cfht_sort_key,
     check_variance,
     describe,
     emit,
@@ -150,7 +151,7 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
     to now is not in CFHT at all. It is reported as since_last_change_cal (calendar
     hours; BH is not recorded), in the court given by Case.FLAGS__ViewedFlag__c.
     """
-    records.sort(key=lambda r: parse_dt(get(r, START)) or parse_dt("1900-01-01"))
+    records.sort(key=cfht_sort_key)
     if is_closed is None:
         is_closed = infer_closed(case_id, records)
 

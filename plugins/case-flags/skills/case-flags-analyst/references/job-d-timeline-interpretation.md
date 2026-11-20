@@ -25,7 +25,7 @@ than `Local Automation` alone.
   band (`FLAGS__CaseTimeOffset_n__c` to `_n+1__c`) — i.e., it sat past where the org's own SLA said it
   should move to the next level. For a flag-down interval, compare against the flag-down long-gap bar in
   the SKILL.md **Tunable constants** block.
-- **(D) Breach** — the interval in which the case crossed into L4 (`Flag_Level = 'L4'` first appearing, or
+- **(D) Breach** — the interval in which the case crossed into L4 (`Flag_Level_BH = 'L4'` first appearing, or
   wall-clock passed `CaseFlagsEscalationTime4` while still flagged)
 - **(E) Follow-up reflag** — `Action = 'Follow-Up Process'`
 - **(F) Org-custom tracked field** — see "Detecting custom tracking" below
@@ -39,8 +39,8 @@ than `Local Automation` alone.
 current status, opened date, closed date if applicable, total age; initial response time
 (`Initial_Response_Business_Hours__c`); count of response cycles and total time-with-company (sum of
 flag-up `Business_Hours_Elapsed__c`, excluding the `Flag Cleared`+`Case Closed` housekeeping interval);
-total time-with-customer (sum of flag-down elapsed); handoff count; status-change count (if tracked);
-breach count (how many times it reached L4); follow-up-reflag count; **recurrence count** (number of
+total time-with-customer (sum of flag-down elapsed, excluding post-resolution and closed-gap time as defined in `references/field-reference.md`; report those separately if non-trivial); handoff count; status-change count (if tracked);
+breach count (how many separate times it reached L4: count contiguous L4 stretches, not L4 records, since one breach can span several records); follow-up-reflag count; **recurrence count** (number of
 close events — `Action = 'Case Closed'`, either Event shape — beyond the first) and, if any, how each
 reopening was triggered; aging speed(s) that
 applied.

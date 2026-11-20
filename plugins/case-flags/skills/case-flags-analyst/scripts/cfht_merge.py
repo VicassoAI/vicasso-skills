@@ -68,8 +68,8 @@ def merge(paths: list[str]) -> tuple[list[dict], dict]:
         for record in records:
             record_id = get(record, "Id")
             if not record_id:
-                # Without an Id there is no dedupe key; keep it but flag it, since an
-                # aggregate query result should not be going through this script at all.
+                # Without an Id there is no dedupe key, so the row is dropped and counted;
+                # an aggregate query result should not be going through this script at all.
                 missing_id += 1
                 continue
             if record_id in seen:
@@ -119,7 +119,8 @@ def main() -> int:
     try:
         records, stats = merge(args.pages)
         if not records:
-            raise DataError("No records with an Id across the supplied pages.")
+            print("No records with an Id across the supplied pages.", file=sys.stderr)
+            return 1  # README contract: 1 = empty input
 
         required = args.require if args.require is not None else DEFAULT_REQUIRED
         require_columns(records, required, "merged CFHT pull")
@@ -128,9 +129,6 @@ def main() -> int:
             out_path = args.out
         else:
             out_path = os.path.join(session_cache_dir(), f"{args.label}.json")
-        # 0600: the cache holds real case data, not scratch.
-        write_json_private(out_path, records)
-
         warnings = []
         if stats["rows_without_id"]:
             warnings.append(
@@ -160,6 +158,14 @@ def main() -> int:
                     "the count and the pages were run against different WHERE clauses or "
                     "windows -- verify they match."
                 )
+
+        # Cache only a pull that reconciles (or wasn't asked to): a short pull cached as
+        # "reuse this path" would quietly feed every later job in the session.
+        if reconciliation and not reconciliation["passed"]:
+            out_path = None
+        else:
+            # 0600: the cache holds real case data, not scratch.
+            write_json_private(out_path, records)
 
         # A single page landing exactly on the cap almost always means more pages exist.
         for page in stats["pages"]:
@@ -202,8 +208,11 @@ def main() -> int:
             if cover["earliest_start"]:
                 print(f"Start span: {cover['earliest_start'][:10]} -> "
                       f"{cover['latest_start'][:10]} ({cover['days_spanned']} days)")
-            print(f"\ncached: {data['cache_path']}")
-            print("Reuse this path for other jobs this session instead of re-pulling.")
+            if data["cache_path"]:
+                print(f"\ncached: {data['cache_path']}")
+                print("Reuse this path for other jobs this session instead of re-pulling.")
+            else:
+                print("\nNOT cached: the count did not reconcile. Pull the missing page(s) first.")
 
         emit(payload, args.json, render)
         if reconciliation and not reconciliation["passed"]:

@@ -21,7 +21,7 @@ WHERE OwnerId = '{REP_ID}'
 **9.2 CFHT full pull** — CRITICAL: `FLAGS__Business_Hours_Elapsed__c` is required, not optional (see
 references/job-f-assignment-response-split.md "Known pitfalls" for what happens if it's dropped):
 ```sql
-SELECT Id, FLAGS__Case__c, FLAGS__Start__c, FLAGS__End__c, FLAGS__Owner__c,
+SELECT Id, FLAGS__Case__c, FLAGS__Case_Flag_History_Number__c, FLAGS__Start__c, FLAGS__End__c, FLAGS__Owner__c,
        FLAGS__Owner_Name__c, FLAGS__Event__c, FLAGS__Business_Hours_Elapsed__c
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__c IN (

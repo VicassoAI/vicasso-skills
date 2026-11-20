@@ -51,7 +51,7 @@ Semantics canonical in `references/field-reference.md` ("Recurrence" / "Close ev
 From the
 same pulled record set (no extra query needed): count close events — `Action = 'Case Closed'`, whether
 `Event` is `'Flag Cleared'` (closed while flagged) or `'Case Status Changed'` (closed while unflagged);
-more than one = recurred. For each reopening beyond the first, read the `Flag Set` record immediately
+more than one = recurred. For every close except the last (each one was followed by a reopening), read the `Flag Set` record immediately
 following the close (by `Start__c`) and classify its `Action__c` per the field-reference trigger rules.
 
 ### Recurrence rate (job E — portfolio level)

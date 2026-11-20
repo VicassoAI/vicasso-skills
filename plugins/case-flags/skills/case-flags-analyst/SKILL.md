@@ -127,8 +127,14 @@ connection. From the Preflight, hold these for the rest of the session:
 - **Business hours** — present age/timing in whatever dimension the org runs on; you never ask the user. Do
   **not** infer "no business hours" from a null `FLAGS__BusinessHoursId__c` at the org-default row: a null
   there is common even when business-hours mode is fully active (a per-speed or per-entitlement calendar
-  applies). Confirm from the data instead — if `FLAGS__Business_Hours_Elapsed__c` runs well below
-  `FLAGS__Hours_Elapsed__c`, BH is in effect; lead with BH.
+  applies). Confirm from the data instead, using Case fields so the check works without CFHT: if
+  `FLAGS__Initial_Response_Business_Hours__c` runs well below `FLAGS__Initial_Response_Hours__c` on recent
+  responded cases (or `FLAGS__Case_Flag_Business_Age__c` below `FLAGS__Case_Flag_Age__c` on flagged ones),
+  BH is in effect, so lead with BH. CFHT's `Business_Hours_Elapsed__c` vs `Hours_Elapsed__c` gives the same
+  answer when CFHT is available.
+- **Follow-up disabled** — when `FLAGS__Enable_Follow_Up_Process__c` is false, `{FOLLOW_UP_ON}` /
+  `{NEXT_STEPS}` may be blank: remove those columns and conditions from every query before running it,
+  rather than substituting an empty name.
 
 Resolve case links from the org base URL: render `CaseNumber` as a link to
 `/lightning/r/Case/{Id}/view`. If the base URL can't be determined, show the plain number.

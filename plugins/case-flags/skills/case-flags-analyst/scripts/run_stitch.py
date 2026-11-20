@@ -42,6 +42,7 @@ from collections import defaultdict
 
 from cfa_common import (
     DataError,
+    cfht_sort_key,
     check_variance,
     describe,
     emit,
@@ -50,6 +51,7 @@ from cfa_common import (
     load_records,
     median,
     parse_dt,
+    shift,
     require_columns,
     table,
     to_float,
@@ -103,7 +105,7 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
     for case_id, case_records in by_case.items():
         # Re-sort defensively: relying on the caller's ORDER BY is how off-by-one
         # walks creep in, and sorting a few thousand rows is free.
-        case_records.sort(key=lambda r: (parse_dt(get(r, START)) or parse_dt("1900-01-01")))
+        case_records.sort(key=cfht_sort_key)
 
         index = 0
         total = len(case_records)
@@ -137,7 +139,11 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
                         (to_float(get(r, BH)) or 0.0) for r in run_records
                     ),
                     "opening_trigger": get(preceding, ACTION) if preceding else None,
-                    "flagged_at_creation": preceding is None,
+                    # No preceding record has two causes: the case really was flagged at
+                    # creation (history number 001), or the pull's window starts mid-case.
+                    # Only the first is "at creation"; the second is truncated history.
+                    "flagged_at_creation": preceding is None and _is_first_record(run_records[0]),
+                    "truncated_start": preceding is None and not _is_first_record(run_records[0]),
                     "closing_event": closing_event,
                     "closing_action": closing_action,
                     # A genuine clear is a human reply. The Flag Cleared + Case Closed
@@ -152,6 +158,17 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
     return runs
 
 
+def _is_first_record(record: dict) -> bool:
+    """True when this is the case's first CFHT record (history number 001), or unknown."""
+    seq = get(record, "FLAGS__Case_Flag_History_Number__c") or get(record, "Name")
+    if seq is None:
+        return True  # field not selected: keep the old reading, but collect_warnings says so
+    try:
+        return int(str(seq).strip()) == 1
+    except ValueError:
+        return True
+
+
 def collect_warnings(runs: list[dict], records: list[dict]) -> list[str]:
     warnings = []
     variance = check_variance([r["bh_total"] for r in runs], "run BH total")
@@ -161,6 +178,20 @@ def collect_warnings(runs: list[dict], records: list[dict]) -> list[str]:
         warnings.append(
             f"All {len(runs)} runs computed to 0.00 BH. Confirm {BH} was in the SELECT "
             "list and actually populated -- an all-zero column is a data bug, not a finding."
+        )
+    truncated = sum(1 for r in runs if r.get("truncated_start"))
+    if truncated:
+        warnings.append(
+            f"{truncated} run(s) start at the first record IN THE PULL but not the case's first "
+            "record: the window cut them. Their BH total is short and their opening trigger is "
+            "unreadable; excluded from the follow-up/other split as truncated, not 'at creation'."
+        )
+    if runs and not any(get(r, "FLAGS__Case_Flag_History_Number__c") or get(r, "Name")
+                        for r in records[:50]):
+        warnings.append(
+            "History number not selected (FLAGS__Case_Flag_History_Number__c): ties on Start "
+            "can't be ordered reliably and window-truncated runs can't be told from runs "
+            "flagged at creation. Add it to the SELECT."
         )
     orphans = sum(1 for r in runs if r["flagged_at_creation"])
     if orphans:
@@ -184,11 +215,19 @@ def mode_ongoing(runs: list[dict]) -> dict:
     """
     genuine = [r for r in runs if r["genuine_clear"]]
 
-    per_case: dict[str, list[float]] = defaultdict(list)
-    for run in genuine:
-        per_case[run["case"]].append(run["bh_total"])
-
-    case_means = [sum(v) / len(v) for v in per_case.values() if v]
+    # Method (a) exactly as references/field-reference.md defines it (and as the two
+    # GROUP BY queries compute it): per case, ALL flag-up BH / genuine-clear count. It
+    # includes flag-up time in runs that ended in a close or are still open, which is
+    # why it can differ from (b). Averaging only the genuine runs would make (a) and (b)
+    # agree by construction and hide that gap.
+    up_bh: dict[str, float] = defaultdict(float)
+    clears: dict[str, int] = defaultdict(int)
+    for run in runs:
+        up_bh[run["case"]] += run["bh_total"]
+        if run["genuine_clear"]:
+            clears[run["case"]] += 1
+    per_case = clears
+    case_means = [up_bh[c] / n for c, n in clears.items() if n]
 
     return {
         "mode": "ongoing",
@@ -202,7 +241,7 @@ def mode_ongoing(runs: list[dict]) -> dict:
     }
 
 
-def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
+def mode_followup_split(runs: list[dict], group_by: str | None, utc_offset: float = 0.0) -> dict:
     """
     Bucket genuine clears by opening trigger, per group.
 
@@ -222,7 +261,7 @@ def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
 
         if not run["genuine_clear"]:
             continue
-        if run["flagged_at_creation"]:
+        if run["flagged_at_creation"] or run.get("truncated_start"):
             bucket["excluded_at_creation"] += 1
             continue
 
@@ -238,7 +277,7 @@ def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
             "followup_clears": bucket["followup_clears"],
             "other_clears": bucket["other_clears"],
             "excluded_at_creation": bucket["excluded_at_creation"],
-            "batching": batching_gap(bucket["followup_end_times"]),
+            "batching": batching_gap(bucket["followup_end_times"], utc_offset),
         }
 
     return {"mode": "followup-split", "groups": results,
@@ -246,7 +285,7 @@ def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
                     "to convert to hours. Run BH is NOT a labour proxy."}
 
 
-def batching_gap(end_times: list) -> dict:
+def batching_gap(end_times: list, utc_offset: float = 0.0) -> dict:
     """
     Median gap between consecutive same-day follow-up clears (3+ on a day).
 
@@ -259,7 +298,8 @@ def batching_gap(end_times: list) -> dict:
     for value in end_times:
         parsed = parse_dt(value)
         if parsed:
-            by_day[parsed.date().isoformat()].append(parsed)
+            # Group by the rep's LOCAL day: a US afternoon spans two UTC dates.
+            by_day[shift(parsed, utc_offset).date().isoformat()].append(parsed)
 
     gaps: list[float] = []
     batch_days = 0
@@ -397,7 +437,7 @@ def render(payload: dict) -> None:
                 f"{fnum(gap, 1)} min" if gap is not None else "none",
             ])
         print(table(rows, ["Group", "Follow-up clears", "Other clears",
-                           "Excluded (at creation)", "Batching gap"]))
+                           "Excluded (at creation or truncated)", "Batching gap"]))
         print(f"\n{payload['note']}")
 
     elif mode == "worst-run":
@@ -446,6 +486,9 @@ def main() -> int:
     parser.add_argument("--stall-bar", type=float, default=None,
                         help="worst-run: org ET3 offset in BH from Preflight "
                              "(FLAGS__TimeOffset3__c). Never hardcode this.")
+    parser.add_argument("--utc-offset", type=float, default=0.0,
+                        help="followup-split: the rep's UTC offset in hours (e.g. -5 for US "
+                             "Eastern standard time) so batching days are local days")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -466,7 +509,7 @@ def main() -> int:
             elif args.mode == "ongoing":
                 payload = mode_ongoing(runs)
             elif args.mode == "followup-split":
-                payload = mode_followup_split(runs, args.group_by)
+                payload = mode_followup_split(runs, args.group_by, args.utc_offset)
             else:
                 payload = mode_worst_run(runs, args.stall_bar)
             payload["warnings"] = warnings

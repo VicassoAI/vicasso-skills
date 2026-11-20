@@ -50,6 +50,7 @@ from collections import defaultdict
 
 from cfa_common import (
     DataError,
+    cfht_sort_key,
     describe,
     emit,
     fnum,
@@ -135,28 +136,48 @@ def split_cases(
             missing_cfht += 1
             results.append({
                 "case": case_id, "bucket": "no_handoff_recorded",
-                "assignment_bh": 0.0, "response_bh": total_ir, "total_ir_bh": total_ir,
+                "assignment_bh": None, "response_bh": total_ir, "total_ir_bh": total_ir,
                 "residual": 0.0, "reason": "no CFHT records inside the retention window",
                 "transition_record_id": None, "actor": None, "transition_verified": None,
             })
             continue
 
-        records.sort(key=lambda r: (parse_dt(get(r, START)) or parse_dt("1900-01-01")))
+        records.sort(key=cfht_sort_key)
 
-        # Locate the landing transition: the first index whose owner is the final owner
-        # AND whose predecessor had a different owner. The transition record is i-1.
+        # Only the stretch up to the initial response matters. The population is cases
+        # the rep owns NOW, which is not the same as the rep having given the initial
+        # response: someone else may have answered and handed it over afterwards. Searching
+        # past the response counts post-response time as "assignment" and drives the
+        # response negative.
+        ir_index = next(
+            (i for i, r in enumerate(records) if get(r, EVENT) == FLAG_CLEARED), None
+        )
+        horizon = ir_index if ir_index is not None else len(records) - 1
+        responder = get(records[horizon], OWNER)
+        if ir_index is not None and responder != rep_id:
+            results.append({
+                "case": case_id, "bucket": "answered_by_other",
+                "assignment_bh": None, "response_bh": None, "total_ir_bh": total_ir,
+                "residual": None,
+                "reason": "initial response was given by a different owner; the rep received "
+                          "the case afterwards",
+                "transition_record_id": None, "actor": None, "transition_verified": None,
+            })
+            continue
+
+        # The FINAL landing into the responder before the response (job-f multi-hop rule:
+        # rep -> other -> rep lumps everything up to the last arrival). Transition is i-1.
         landing_index = None
-        for index in range(1, len(records)):
+        for index in range(1, horizon + 1):
             if get(records[index], OWNER) == rep_id and get(records[index - 1], OWNER) != rep_id:
                 landing_index = index
-                break
 
         if landing_index is None:
             # Owned by the final owner from the first record in the window: no handoff.
             # Assignment time is genuinely unknown -- do NOT guess who assigned it or when.
             results.append({
                 "case": case_id, "bucket": "no_handoff_recorded",
-                "assignment_bh": 0.0, "response_bh": total_ir, "total_ir_bh": total_ir,
+                "assignment_bh": None, "response_bh": total_ir, "total_ir_bh": total_ir,
                 "residual": 0.0,
                 "reason": "no Case Owner Changed into the final owner within the window",
                 "transition_record_id": None, "actor": None, "transition_verified": None,
@@ -238,7 +259,7 @@ def measured_ir_bh(records: list[dict], landing_index: int) -> float | None:
 def _assert_not_all_zero(results: list[dict]) -> None:
     """Pitfall 1: a uniform zero assignment time across a population is a bug."""
     handoffs = [r for r in results if r["reason"] is None]
-    if len(handoffs) >= 20 and all(r["assignment_bh"] == 0.0 for r in handoffs):
+    if len(handoffs) >= 5 and all(r["assignment_bh"] == 0.0 for r in handoffs):
         raise DataError(
             f"All {len(handoffs)} handoff cases computed 0.00 BH assignment time. This is "
             f"job-f pitfall 1, not a finding: queue dwell is genuinely non-trivial "
@@ -364,7 +385,8 @@ def summarise(results: list[dict], warnings: list[str]) -> dict:
     for name, rows in buckets.items():
         summary[name] = {
             "n": len(rows),
-            "assignment": describe([r["assignment_bh"] for r in rows]),
+            # None = assignment time unknown (no handoff in the window): excluded, not 0.
+            "assignment": describe([r["assignment_bh"] for r in rows if r["assignment_bh"] is not None]),
             "response": describe([r["response_bh"] for r in rows]),
         }
 
@@ -376,7 +398,7 @@ def summarise(results: list[dict], warnings: list[str]) -> dict:
     gap = None
     self_median = median([r["response_bh"] for r in buckets.get("self_assigned", [])])
     peer_median = median([r["response_bh"] for r in buckets.get("peer_assigned", [])])
-    if self_median and peer_median:
+    if self_median is not None and peer_median is not None:
         gap = {
             "self_median_response_bh": self_median,
             "peer_median_response_bh": peer_median,
@@ -479,6 +501,9 @@ def main() -> int:
             )
 
         cfht = load_records(args.cfht)
+        if not cfht:
+            print("No CFHT records in input.", file=sys.stderr)
+            return 1  # README contract: 1 = empty input
         population = load_case_population(args.cases)
         actors = load_actor_map(args.actors)
 

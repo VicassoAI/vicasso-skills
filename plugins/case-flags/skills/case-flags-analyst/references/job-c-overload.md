@@ -23,6 +23,10 @@ work in their queue — plus what's likely to still arrive today — to a day's 
     CFHT probe**: attempt it directly; an access error means CFHT is unavailable — fall back to the
     initial median in its place and state plainly that the read is "based on average time for initial
     response." Flag the read as low-confidence if fewer than ~10 distinct workdays are in the sample.
+    Be clear that this fallback is a **wait-time stand-in**, not a labor measure: the initial-response
+    median is how long customers waited, which is exactly what `labor_per_clear` was introduced to stop
+    using. It's the best signal available without CFHT. Present the load as a rough upper bound rather
+    than a calibrated estimate.
 
 **Why this replaced the BH-elapsed ongoing median:** the old metric measured how long a flag sat before
 clearing, not how long the rep actually spent on it — a case that ages for 2.5 business hours before a

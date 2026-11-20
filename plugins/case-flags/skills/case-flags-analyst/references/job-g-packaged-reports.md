@@ -105,7 +105,7 @@ A count of currently red/black flagged cases per owner. Both variants are `CaseL
 no CFHT, no date filter (current state):
 
 - **Metric:** record count of Cases, grouped by Case Owner (`Owner.Name`).
-- **Filters:** `Owner != ''` (person-owned) AND the flag field **contains** "L3,L4". The report uses a
+- **Filters:** `Owner != ''` (any owner; on a Case report this does **not** exclude queues, so queue-owned red/black cases appear under the queue's name) AND the flag field **contains** "L3,L4". The report uses a
   text-contains match on the rendered flag HTML — the Standard variant on `FLAGS__CaseFlag__c`, the BH
   variant on `FLAGS__Case_Flag_Business__c`. Salesforce "contains L3,L4" is an OR, so it catches cases whose
   flag markup shows either L3 or L4. Scope `organization`; no date bound.

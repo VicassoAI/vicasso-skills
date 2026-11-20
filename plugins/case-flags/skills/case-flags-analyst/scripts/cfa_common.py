@@ -169,14 +169,22 @@ def require_columns(records: Sequence[dict], columns: Iterable[str], context: st
         return
 
     columns = list(columns)
-    present: set[str] = set()
-    for record in records[: min(len(records), 200)]:
-        present.update(record.keys())
+
+    def keys_of(record: dict) -> set[str]:
+        keys = set(record.keys())
         for key, value in record.items():
             if isinstance(value, dict):
-                present.update(f"{key}.{sub}" for sub in value)
+                keys.update(f"{key}.{sub}" for sub in value)
+        return keys
 
-    missing = [c for c in columns if c not in present]
+    # Every record, not "any of the first 200": merged pages can come from different
+    # SELECT lists, and a later page missing the column is exactly the silent-zero case.
+    # Salesforce returns selected-but-null fields as explicit nulls, so a missing KEY
+    # means the column was not selected.
+    missing: list[str] = []
+    for record in records:
+        absent = [c for c in columns if c not in missing and c not in keys_of(record)]
+        missing.extend(absent)
     if missing:
         where = f" ({context})" if context else ""
         raise DataError(
@@ -318,6 +326,20 @@ def parse_dt(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def cfht_sort_key(record: dict, start_field: str = "FLAGS__Start__c"):
+    """
+    Order CFHT records within a case: Start, then the per-case history number.
+
+    Records can share a Start to the second (a zero-length interval written in the same
+    transaction as the next one -- seen live). Sorting on Start alone leaves their order
+    to the input, and §9.2's DESC tail page reverses it. The history number
+    (FLAGS__Case_Flag_History_Number__c, mirrored in Name) breaks the tie in write order.
+    """
+    start = parse_dt(get(record, start_field)) or parse_dt("1900-01-01")
+    seq = get(record, "FLAGS__Case_Flag_History_Number__c") or get(record, "Name") or ""
+    return (start, str(seq).zfill(10))
 
 
 def shift(dt: datetime, offset_hours: float) -> datetime:

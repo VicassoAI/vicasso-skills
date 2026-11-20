@@ -13,24 +13,35 @@ approach in §5 (`references/soql-overload.md`) and §7.4
 be reconstructed
 in code (a GROUP BY can't express "the action of the record before this run started").
 
-**Individual (Job C add-on):**
+**Pull whole cases, then filter to the owner in code.** Filtering the pull on `FLAGS__Owner__c` drops
+the queue's (or another rep's) records from the same case. The record just before the rep's first run is
+then missing: the run looks like it started at the case's first record, gets excluded as "flagged at
+creation", and `other_clears` is undercounted on every case that arrived from a queue. So select the
+cases the owner had a record on, then pull all of those cases' records. This takes two queries: SOQL
+rejects a semi-join from CFHT back into CFHT ("inner and outer selects should not be on the same
+object type", verified live).
+
+**Step 1: the owner's cases** (Job C: `= '{UID}'`; Job E team rollup: `IN ({REPORT_IDS})`):
 ```sql
-SELECT FLAGS__Case__c, FLAGS__Start__c, FLAGS__End__c, FLAGS__Flag_Set__c,
-       FLAGS__Event__c, FLAGS__Action__c
+SELECT FLAGS__Case__c
 FROM FLAGS__Case_Flags_History_Tracking__c
-WHERE FLAGS__Owner__c = '{UID}' AND FLAGS__Start__c = LAST_N_DAYS:90
+WHERE FLAGS__Owner__c = '{UID}' AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
+GROUP BY FLAGS__Case__c
+```
+
+**Step 2: every record on those cases** (batch `{CASE_IDS}` at ~200 Ids per query):
+```sql
+SELECT FLAGS__Owner__c, FLAGS__Case__c, FLAGS__Case_Flag_History_Number__c, FLAGS__Start__c,
+       FLAGS__End__c, FLAGS__Flag_Set__c, FLAGS__Event__c, FLAGS__Action__c
+FROM FLAGS__Case_Flags_History_Tracking__c
+WHERE FLAGS__Case__c IN ({CASE_IDS}) AND FLAGS__Start__c = LAST_N_DAYS:90
 ORDER BY FLAGS__Case__c, FLAGS__Start__c ASC
 ```
 
-**Team (Job E rollup):** same shape, `FLAGS__Owner__c IN ({REPORT_IDS})`, and include
-`FLAGS__Owner__c` in the SELECT so runs can be grouped by owner before reconstruction:
-```sql
-SELECT FLAGS__Owner__c, FLAGS__Case__c, FLAGS__Start__c, FLAGS__End__c, FLAGS__Flag_Set__c,
-       FLAGS__Event__c, FLAGS__Action__c
-FROM FLAGS__Case_Flags_History_Tracking__c
-WHERE FLAGS__Owner__c IN ({REPORT_IDS}) AND FLAGS__Start__c = LAST_N_DAYS:90
-ORDER BY FLAGS__Owner__c, FLAGS__Case__c, FLAGS__Start__c ASC
-```
+In code, reconstruct runs per case on the full record set, then keep only runs whose records belong to
+the owner(s) in question. `FLAGS__Case_Flag_History_Number__c` orders records that share a `Start` and
+separates "flagged at creation" (history number 001) from runs the 90-day window cut off; see
+`scripts/run_stitch.py`.
 
 An active rep can return 1,000+ raw rows over 90 days (verified live: ~1,977 for one rep) — well within
 the 50,000-row transaction cap, but don't repeat this pull if the §5 / §7.4 daily-clear-count query

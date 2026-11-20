@@ -41,20 +41,21 @@ SELECT OwnerId, FLAGS__Initial_Response_Business_Hours__c
 FROM Case
 WHERE OwnerId IN ({REPORT_IDS})
   AND FLAGS__Initial_Response__c != null
-  AND FLAGS__Initial_Response__c = LAST_N_DAYS:90
+  AND FLAGS__Initial_Response__c = LAST_N_DAYS:90 {CF_SCOPE}
 ```
 Compute each owner's median in code.
 
 ### 7.4 labor_per_clear (all reports; CFHT — the lazy probe for this job)
 Same daily-clear-count method as §5 (`references/soql-overload.md`), grouped by owner and day:
 ```sql
-SELECT FLAGS__Owner__c, DAY_ONLY(FLAGS__Start__c) clear_day, COUNT(Id) clears
+SELECT FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c)) clear_day, COUNT(Id) clears
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Owner__c IN ({REPORT_IDS})
   AND FLAGS__Event__c = 'Flag Cleared' AND FLAGS__Action__c != 'Case Closed'
-  AND FLAGS__Start__c = LAST_N_DAYS:90
-GROUP BY FLAGS__Owner__c, DAY_ONLY(FLAGS__Start__c)
+  AND FLAGS__End__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
+GROUP BY FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c))
 ```
+Group on local `End`, not `Start`; §5 in `references/soql-overload.md` explains why.
 Per owner: `avg_daily_clear_count` = median of that owner's per-day clear counts (days with zero clears
 won't appear, which is the intended exclusion); `labor_per_clear = 8h ÷ avg_daily_clear_count`. Flag any
 owner with fewer than ~10 distinct workdays in the result as low-confidence. On an access error, fall back

@@ -7,8 +7,16 @@ Conventions used below:
 - `{REPORT_IDS}` — comma-quoted Ids of a manager's direct reports (§7, `references/soql-team-view.md`).
 - `{FOLLOW_UP_ON}` / `{NEXT_STEPS}` — the Case field API names read from FlagPref
   (`FLAGS__Follow_Up_On_Field__c` / `FLAGS__Next_Steps_Field__c`). Substitute the literal API names.
-- `{CF_SCOPE}` — if the org is selective (`FLAGS__Organization_Wide__c = false`), append
-  ` AND FLAGS__Enable_Case_Flags__c = true`; if org-wide, append nothing.
+- `{CF_SCOPE}` — for queries **FROM Case**: if the org is selective (`FLAGS__Organization_Wide__c =
+  false`), append ` AND FLAGS__Enable_Case_Flags__c = true`; if org-wide, append nothing.
+- `{CF_SCOPE_CFHT}` — the same filter for queries **FROM CFHT**, through the parent:
+  ` AND FLAGS__Case__r.FLAGS__Enable_Case_Flags__c = true` (selective orgs only). Don't swap the two:
+  the CFHT form fails on Case, and CFHT does contain records for cases not currently enabled (verified
+  live: 19 in one selective org).
+- Other placeholders: `{CASE_ID}` / `{CASE_IDS}` (quoted 18-char Ids), `{REP_ID}` (a User Id),
+  `{QUEUE_IDS}`, `{AID}` (Account Id), `{TRANSITION_RECORD_IDS}` (CFHT Ids), and
+  `{WINDOW_START}` / `{WINDOW_END}` (unquoted ISO datetimes, e.g. `2026-08-01T00:00:00Z`). `{TERM}`
+  is user text inside `LIKE '%…%'`: escape `'` as `\'`.
 
 Always run the Preflight first; every other query depends on its output. There is no standalone CFHT
 probe — the first CFHT query a job needs doubles as the probe (see SKILL.md, "CFHT availability").

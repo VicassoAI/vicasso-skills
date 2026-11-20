@@ -14,7 +14,7 @@ SELECT FLAGS__Initial_Response_Business_Hours__c
 FROM Case
 WHERE OwnerId = '{UID}'
   AND FLAGS__Initial_Response__c != null
-  AND FLAGS__Initial_Response__c = LAST_N_DAYS:90
+  AND FLAGS__Initial_Response__c = LAST_N_DAYS:90 {CF_SCOPE}
 ```
 Compute the median (in business hours) of the returned values.
 
@@ -30,12 +30,17 @@ It's self-calibrating per rep without needing to classify case complexity at all
 
 **Daily clear count (per rep, per calendar day):**
 ```sql
-SELECT FLAGS__Owner__c, DAY_ONLY(FLAGS__Start__c) clear_day, COUNT(Id) clears
+SELECT FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c)) clear_day, COUNT(Id) clears
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Owner__c = '{UID}' AND FLAGS__Event__c = 'Flag Cleared'
-  AND FLAGS__Action__c != 'Case Closed' AND FLAGS__Start__c = LAST_N_DAYS:90
-GROUP BY FLAGS__Owner__c, DAY_ONLY(FLAGS__Start__c)
+  AND FLAGS__Action__c != 'Case Closed' AND FLAGS__End__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
+GROUP BY FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c))
 ```
+**Group on `End`, in local time.** `Event` describes the transition that *ended* the record, so the clear
+happens at `End`. Grouping on `Start` credits a clear to the day the flag went up, and a plain
+`DAY_ONLY` buckets by UTC day. Verified live on one rep over 90 days: grouping by `Start` gave 68
+"work days", including 4 Sundays and Labor Day with 1–2 clears each, while grouping by local `End` gave
+64. Those phantom low-count days pull the median down and inflate `labor_per_clear`.
 Excluding `Action = 'Case Closed'` matters here for the same reason as the old model — a closed-case clear
 is housekeeping, not a responsiveness action, and would inflate the count on cleanup days. Days with zero
 clears (weekends, PTO, OOO) simply don't appear in the GROUP BY result, which is exactly the exclusion the

@@ -52,8 +52,10 @@ Lead the **"how they experienced us"** side with the three reads you asked for, 
 Then the **"how responsive the account has been"** side (their court, `Flag_Set = false`):
 
 - *Typical turnaround* — median of flag-down interval business-hours, **excluding the trailing
-  post-resolution interval** (a down-interval whose `FLAGS__Action__c = 'Case Closed'`); otherwise a long
-  pending-closure dwell inflates their apparent slowness (`references/field-reference.md`, "Time with company vs
+  post-resolution interval** (a down-interval whose `FLAGS__Action__c = 'Case Closed'`) **and any closed-gap
+  time** (flag-down records after a close, until the flag next goes up; see `references/field-reference.md`).
+  Otherwise a long pending-closure dwell, or weeks a case sat closed before the customer wrote back,
+  inflates their apparent slowness (`references/field-reference.md`, "Time with company vs
   customer"). Their worst gap is the max of the same set.
 - *Currently in their court* — a snapshot count of the account's **open** cases with no flag up right now
   (we're waiting on them). This is the one live, actionable number on the customer side.

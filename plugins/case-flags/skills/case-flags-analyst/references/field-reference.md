@@ -94,7 +94,7 @@ window. Read in `Start` order, the records reconstruct the responsiveness timeli
 | `FLAGS__Event__c` | Flag Set, Flag Cleared, Case Owner Changed, Case Status Changed. Describes the transition that ENDED this interval |
 | `FLAGS__Action__c` | What initiated it. Validated picklist + observed values: Local Automation, Case Created, Case Closed, Set Flag Button, Clear Flag Button, External/Internal Comment Added, Email Received, Email Sent, Customer Attachment Added, Task Completed, **Follow-Up Process**, **User Action or Non-Flags Automation**. (There is no "Automatically Cleared" value.) |
 | `FLAGS__Reason__c` | Free-text reason the flag was set or cleared (when populated) |
-| `FLAGS__Owner__c` / `FLAGS__Owner_Name__c` | Case owner during the interval (a queue if queue-owned) |
+| `FLAGS__Owner__c` / `FLAGS__Owner_Name__c` | Case owner during the interval. **When a queue holds the case, `Owner__c` is null** and the queue's name is in `Owner_Name__c` (with the Id in `Queue_Id__c`). Verified live 2026-11-20. So `Owner__c != null` means a person owned it, and grouping by `Owner_Name__c` mixes queues in with people |
 | `FLAGS__Owner_Is_Active__c` | Whether that owner is still an active user (useful when summarizing past work) |
 | `FLAGS__Owner_License_Type__c` | The interval owner's Salesforce license type (e.g. `Standard`). Packaged and portable. *Some* packaged reports (e.g. Average Time to Respond by Owner) filter to `= 'Standard'` to limit to full-license internal users; others (e.g. Average Time to Respond in Queue) do not — see Job G |
 | `FLAGS__Queue_Id__c` | Queue Id if queue-owned during the interval |
@@ -119,6 +119,13 @@ per-case sum silently defaults to 0, which reads as a real (and wrong) finding �
 time is always zero" — rather than a missing column. This happened once during Job F's development;
 treat a uniform, no-variance result across an entire population as a signal to check the field list
 before trusting it.
+
+**Post-resolution time, defined once.** The flag-down interval that ends in a case's **final** close
+(`Action = 'Case Closed'`, `Flag_Set = false`) is the resolved-but-not-closed dwell. Earlier closes on a
+reopened case end customer-court stretches, and the time after them, until the flag next goes up, is
+closed-gap time. Jobs D, H and I all use this definition: exclude post-resolution and closed-gap time
+from customer turnaround (Job H) and from customer-court totals (Job D vitals); Job I reports both
+separately.
 
 **Close events come in two shapes (verified live).** The record that ends at a case close always has
 `FLAGS__Action__c = 'Case Closed'`, but its `Event` depends on the flag state at close time:

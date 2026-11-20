@@ -64,7 +64,7 @@ rows:
 SELECT FLAGS__Flag_Set__c, SUM(FLAGS__Business_Hours_Elapsed__c) bh, SUM(FLAGS__Hours_Elapsed__c) h,
        COUNT_DISTINCT(FLAGS__Case__c) cases
 FROM FLAGS__Case_Flags_History_Tracking__c
-WHERE FLAGS__Case__r.IsClosed = true AND FLAGS__Case__r.ClosedDate = LAST_N_DAYS:{N}
+WHERE FLAGS__Case__r.IsClosed = true AND FLAGS__Case__r.ClosedDate = LAST_N_DAYS:{N} {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Flag_Set__c
 ```
 
@@ -75,7 +75,8 @@ for per-case medians, post-resolution and closed-gap separation, handoffs, or st
 ## 11.3 Closed cohort — CFHT pull
 
 ```sql
-SELECT Id, FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Start__c, FLAGS__End__c,
+SELECT Id, FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Case_Flag_History_Number__c,
+       FLAGS__Start__c, FLAGS__End__c,
        FLAGS__Flag_Set__c, FLAGS__Event__c, FLAGS__Action__c, FLAGS__Owner_Name__c,
        FLAGS__Queue_Id__c, FLAGS__Case_Status__c, FLAGS__Flag_Level_BH__c,
        FLAGS__Business_Hours_Elapsed__c, FLAGS__Hours_Elapsed__c,

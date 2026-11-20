@@ -23,7 +23,7 @@ Every case falls into exactly one bucket:
 - **Peer-assigned**: someone else (a teammate) performed the transition that landed the case with
   its final owner.
 - **No handoff recorded**: no `Case Owner Changed` event exists for this case within the CFHT
-  retention window (`FLAGS__HistoryTrackingMonths__c`). Treat assignment time as unknown/0 and
+  retention window (`FLAGS__HistoryTrackingMonths__c`). Treat assignment time as unknown (left out of the assignment medians, not counted as 0) and
   response time as the full total — do NOT guess who assigned it or when. In validation this bucket
   ran ~10-26% of each rep's population; it's common enough to always report as its own line, not a
   footnote.
@@ -56,9 +56,16 @@ action determines that duration. Earlier hops are invisible to this metric by de
    wrong) finding rather than a missing column. This exact mistake happened once already in the
    development of this job; treat its absence from the SELECT list as a blocking bug in any future
    run.
-4. Per case, walk records in Start order. Find the index `i` where `FLAGS__Owner__c` first equals
-   the case's final owner AND the record at `i-1` has a different owner. Record `i-1` is the true
-   landing transition — **not** record `i`. In one verified example, record `i` was a
+4. Per case, walk records in Start order (ties broken by `FLAGS__Case_Flag_History_Number__c`), and
+   **only up to the initial response**: the first `Flag Cleared` record. The owner on that record is the
+   responder.
+   - **Answered by someone else:** if the responder isn't the rep, put the case in its own
+     `answered_by_other` bucket and leave it out of the rep's numbers. The §9.1 population is cases the
+     rep owns *now*, which includes cases someone else answered and handed over later. Walking past the
+     response would count post-response time as "assignment" and push the response negative.
+   - **Otherwise:** within that stretch, find the **last** index `i` where the owner is the rep and the
+     record at `i-1` has a different owner (the FINAL landing, per the multi-hop rule above). Record
+     `i-1` is the true landing transition — **not** record `i`. In one verified example, record `i` was a
    `Case Status Changed` / `Local Automation` blip that fired seconds after the real ownership
    change, under a different user's session — using it as "the" transition silently misattributes
    the actor. Always locate the actual `Event = 'Case Owner Changed'` record; don't assume "first

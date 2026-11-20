@@ -48,13 +48,13 @@ Queue membership can be direct, or through a **public group** or a **role** (ver
 queue memberships held by groups and roles, not users). Resolve the user's groups first, then the queues.
 All of these queries were verified live.
 
-**3a. The user's role chain.** Start from the role Id (from the identity step, or
+**Ring 3, step 1: the user's role chain.** Start from the role Id (from the identity step, or
 `SELECT UserRoleId FROM User WHERE Id = '{UID}'`) and follow `ParentRoleId` until it's null:
 ```sql
 SELECT Id, ParentRoleId FROM UserRole WHERE Id = '{ROLE_ID}'
 ```
 
-**3b. Groups the user is in:**
+**Ring 3, step 2: groups the user is in.**
 ```sql
 SELECT GroupId FROM GroupMember WHERE UserOrGroupId = '{UID}' AND Group.Type = 'Regular'
 ```
@@ -68,12 +68,12 @@ Public groups can be nested, so add one more hop (groups that contain the groups
 SELECT GroupId FROM GroupMember WHERE Group.Type = 'Regular' AND UserOrGroupId IN ({GROUP_IDS})
 ```
 
-**3c. Queues** for the user plus every group found (`{MEMBER_IDS}` = `{UID}` + all group Ids):
+**Ring 3, step 3: queues** for the user plus every group found (`{MEMBER_IDS}` = `{UID}` + all group Ids):
 ```sql
 SELECT GroupId FROM GroupMember WHERE Group.Type = 'Queue' AND UserOrGroupId IN ({MEMBER_IDS})
 ```
 
-**3d. The cases.** Cases already in Ring 2 (I'm on the case team) are excluded, so a case shows once:
+**Ring 3, step 4: the cases.** Cases already in Ring 2 (I'm on the case team) are excluded, so a case shows once:
 ```sql
 SELECT Id, CaseNumber, Subject, Status, Account.Name, OwnerId, Owner.Name,
        FLAGS__Case_Flag_Business__c, FLAGS__Aging_Speed__c, FLAGS__CaseFlagsEscalationTime4__c

@@ -57,8 +57,8 @@ possible (see the job file): the sum of `Business_Hours_Age_1..4` equals the cas
 checked closed cases matched the CFHT flag-up sum to within 0.001 BH. Don't select the calendar
 `FLAGS__Hours_Age_*` fields for SLA; they use calendar-hour thresholds.
 
-**Aggregate first.** For "how much of our cohort's age is ours", one GROUP BY answers it without raw
-rows:
+**Aggregate first, as a rough headline.** For a quick "how much of our cohort's age is ours", one GROUP
+BY gets close without raw rows:
 
 ```sql
 SELECT FLAGS__Flag_Set__c, SUM(FLAGS__Business_Hours_Elapsed__c) bh, SUM(FLAGS__Hours_Elapsed__c) h,
@@ -68,9 +68,16 @@ WHERE FLAGS__Case__r.IsClosed = true AND FLAGS__Case__r.ClosedDate = LAST_N_DAYS
 GROUP BY FLAGS__Flag_Set__c
 ```
 
+It groups only by `Flag_Set`, so it is **not** the script's bucket split:
+- the flag-down total also contains post-resolution, closed-gap and after-close time;
+- the flag-up total also contains flag-up time after the final close.
+
+The customer share it implies is therefore an upper bound. Label it "approximate, before separating
+resolved and closed time". Use the 11.3 pull and the script for any figure you present as the customer
+share, or whenever reopened or after-close cases are likely.
+
 Add `FLAGS__Case__r.Priority` (or another Case field) to the SELECT and GROUP BY to segment it. This
-query is also the lazy CFHT probe when it is the session's first CFHT touch. Pull raw rows (11.3) only
-for per-case medians, post-resolution and closed-gap separation, handoffs, or status splits.
+query is also the lazy CFHT probe when it is the session's first CFHT touch.
 
 ## 11.3 Closed cohort — CFHT pull
 
@@ -94,9 +101,8 @@ Batch `{CASE_IDS}` (about 200 Ids per query keeps the statement short) and expec
 the row count first with `SELECT COUNT(Id)` on the same WHERE, merge pages with `scripts/cfht_merge.py
 --expect-count`, then pass the cached file to `age_decompose.py --cfht … --cases …`.
 
-For a **single case** (lens a), reuse §6's pull in `references/soql-timeline.md`. It selects
-everything above except the two `in_Age_4` fields, so add those two to the SELECT if you want time past
-SLA broken out.
+For a **single case** (lens a, and Job D's vitals), reuse §6's pull in `references/soql-timeline.md`. It
+selects everything the script needs, including `FLAGS__Case__c` and `FLAGS__Business_Hours_in_Age_4__c`.
 
 ## 11.4 Time-in-status fallback — standard `CaseHistory`
 

@@ -15,9 +15,10 @@ Buckets (every CFHT interval lands in exactly one top-level bucket):
   post_resolution  the flag-down STRETCH that ends in the case's final close, plus any
                    flag-down interval in a status passed via --resolved-statuses
                    (e.g. "Pending Closure": resolved, waiting out a close timer)
-                   (Action = 'Case Closed', Flag_Set = false): resolved, not yet closed
-  closed_gap       flag-down intervals that START right after a non-final close and
-                   run until the reopen -- the case sat closed, then came back
+  closed_gap       flag-down records from a non-final close until the reopen: the flag
+                   going up, or the status change that reopens the case (the record that
+                   ENDS with Event = 'Case Status Changed' is the last closed one). The case
+                   sat closed, then came back.
   after_close      every interval AFTER the final close. Cases can keep working while
                    still closed (a customer emails a closed case, or a "closed" status
                    such as "Bug Fix Pending" is used as a parking spot). Salesforce's
@@ -88,6 +89,7 @@ SPEED = "FLAGS__Aging_Speed__c"
 
 CASE_CLOSED = "Case Closed"
 OWNER_CHANGED = "Case Owner Changed"
+STATUS_CHANGED = "Case Status Changed"
 
 BUCKETS = ["our_court", "customer_court", "post_resolution", "closed_gap", "after_close"]
 CASE_BH_ROLLUPS = [f"FLAGS__Business_Hours_Age_{n}__c" for n in range(1, 5)]
@@ -208,18 +210,24 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
                 queue_bh += rec_bh
                 queue_cal += rec_cal
             past_sla_bh += to_float(get(rec, BH_L4)) or 0.0
+        elif in_gap:
+            # Checked before the final close: a record that starts right after one close
+            # and ends at the next was spent closed, whichever close it ends at.
+            bucket = "closed_gap"
         elif i == final_close or get(rec, STATUS) in resolved_statuses:
             # Flag down in a resolved status: nobody is waiting on anybody, the case is
             # done and waiting to close. Org-specific, so only when the caller says so.
             bucket = "post_resolution"
-        elif in_gap:
-            bucket = "closed_gap"
         else:
             bucket = "customer_court"
 
-        # A closed gap runs from a non-final close until the flag next goes up
-        # (the reopen). Several flag-down records can fall inside it.
+        # A closed gap runs from a non-final close until the reopen: the flag going up,
+        # or the status change that reopens the case without a flag (that record is the
+        # last closed one; the next record carries the reopened status).
+        was_gap = in_gap
         if truthy(get(rec, FLAG_SET)):
+            in_gap = False
+        elif was_gap and get(rec, EVENT) == STATUS_CHANGED and get(rec, ACTION) != CASE_CLOSED:
             in_gap = False
         if i in non_final:
             in_gap = True
@@ -422,7 +430,9 @@ def mode_cohort(rows: list[dict], group_by: str | None) -> dict:
         age = sum(v for b, v in totals.items() if b != "after_close") or None
         whole = [m for m in members if not m.get("history_gap_h")]
         our = [m["bh"]["our_court"] for m in whole]
-        ratio = [m["cal_total"] / m["bh_total"] for m in members if m["bh_total"] > 0]
+        # Calendar hours since the last change on an open case have no BH; leave them out.
+        ratio = [(m["cal_total"] - m["open_tail_cal"]) / m["bh_total"]
+                 for m in members if m["bh_total"] > 0]
         out[key] = {
             "cases": len(members),
             "total_bh": totals,
@@ -435,7 +445,9 @@ def mode_cohort(rows: list[dict], group_by: str | None) -> dict:
             "queue_bh_total": sum(m["queue_bh"] for m in members),
             "handoffs_median": describe([m["handoffs"] for m in members])["median"],
             "cases_with_owner_return": sum(1 for m in members if m["owner_returns"]),
-            "reopened": sum(1 for m in members if m["closes"] > 1),
+            # Reopened: closed more than once, or closed before and open now.
+            "reopened": sum(1 for m in members
+                            if m["closes"] > 1 or (m["closes"] and not m["is_closed"])),
             "worked_after_close": sum(1 for m in members if m["cal"]["after_close"] > CALENDAR_TOLERANCE_H),
             "mixed_speeds": sum(1 for m in members if m["mixed_speeds"]),
             # Per-case wait counts and average wait length, one value per case.
@@ -644,6 +656,9 @@ def main() -> int:
                 cases = load_records(args.cases) if args.cases else None
                 resolved = frozenset(x.strip() for x in args.resolved_statuses.split(",") if x.strip())
                 rows = decompose_all(cfht, cases, resolved)
+                if not rows:
+                    print("No CFHT records with FLAGS__Case__c in input.", file=sys.stderr)
+                    return 1  # README contract: 1 = empty input
                 warn = check_variance([r["bh_total"] for r in rows], "total BH per case")
                 if warn:
                     warnings.append(warn)

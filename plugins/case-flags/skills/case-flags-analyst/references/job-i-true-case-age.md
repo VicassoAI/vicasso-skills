@@ -69,7 +69,7 @@ Every CFHT interval lands in exactly one bucket. The script owns the walk: `scri
 | ↳ of which **past SLA** | Time in the L4 band | `Business_Hours_in_Age_4__c` on flag-up intervals. **Never** the calendar-band `Hours_in_Age_4__c` / `Case.FLAGS__Hours_Age_4__c`: those apply the thresholds in calendar hours (one live case showed 80 h "past SLA" against 0 BH) |
 | **Customer court** | We are waiting on them | `Flag_Set = false`, not one of the next two |
 | **Post-resolution** | The final wait before the case closed | the flag-down **stretch** that ends in the **final** `Action = 'Case Closed'` (all contiguous flag-down records, so a status change minutes before the close doesn't leave a stub customer wait), plus flag-down time in any `--resolved-statuses` |
-| **Closed gap** | The case sat closed, then reopened | flag-down interval starting right after a **non-final** close |
+| **Closed gap** | The case sat closed, then reopened | flag-down records from a **non-final** close until the reopen: the flag going up, or the status change that reopens it |
 | **After close** | Work done while the case stayed closed | every interval **after** the final close; flag-up time inside it is reported separately |
 
 **After close is real and common.** The 2026-11-20 check of 30 live cases found 2 cases with history
@@ -92,7 +92,7 @@ not only in the final interval. Flag-up time in that status stays in our court, 
 wrote back. Read the status names off `--mode status`, and ask the person before applying this: it's
 their definition, not the package's.
 
-The trailing post-resolution interval is kept separate because a long "resolved, waiting to close"
+The post-resolution stretch is kept separate because a long "resolved, waiting to close"
 dwell inflates Age without anyone waiting on anyone. Present it neutrally: it may be a deliberate
 confirmation window.
 
@@ -103,7 +103,7 @@ team owns, and it is the figure to coach on, not raw Age.
 
 ### (a) Single case: "why is case 00012345 old?"
 
-Pull §6 (`references/soql-timeline.md`, adding the two `in_Age_4` fields) plus the Case row (§11.2
+Pull §6 (`references/soql-timeline.md`) plus the Case row (§11.2
 fields), then run `age_decompose.py --mode case`. Render:
 
 1. **One line:** "Salesforce's Age shows 8.1 days. Of the 60.6 business hours inside that, 15.6 were
@@ -130,7 +130,7 @@ time since then isn't in CFHT or the rollups.
 
 ### (c) Closed cohort: "how much of our resolution time is us?"
 
-Run the §11.2 aggregate first. It answers the headline (our-court vs customer-court share) in one query.
+Run the §11.2 aggregate first for a rough headline in one query. It overstates the customer share because it can't separate resolved, closed and after-close time, so label it approximate.
 For medians, segments or the finer buckets, pull §11.2 rows plus §11.3, then
 `--mode cohort [--group-by Priority|Origin|Type|Reason|FLAGS__Aging_Speed__c|Owner.Name]`. Lead with:
 
@@ -225,4 +225,4 @@ BH, because that mixes calendar hours with business hours.
 - **Neutrality.** Customer-court time is not a customer failing, and post-resolution time is not
   neglect. Report shares and let the numbers speak, just as Job H does.
 - **Links.** Render case numbers as links per SKILL.md.
-- **Aggregate before raw.** If the §11.2 aggregate answers the question, stop there.
+- **Aggregate before raw.** If the question only needs a rough our-vs-customer split, the §11.2 aggregate is enough (labelled approximate). Anything presented as the customer share, a per-case number or a wait count needs the script.

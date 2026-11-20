@@ -386,7 +386,7 @@ def mode_worst_run(runs: list[dict], stall_bar: float | None) -> dict:
     return result
 
 
-def mode_down_intervals(records: list[dict]) -> dict:
+def mode_down_intervals(records: list[dict], resolved_statuses: frozenset = frozenset()) -> dict:
     """
     Customer-court turnaround, one value per WAIT.
 
@@ -414,7 +414,7 @@ def mode_down_intervals(records: list[dict]) -> dict:
             by_case[get(record, CASE)].append(record)
 
     waits: list[dict] = []
-    excluded = {"ended_in_close": 0, "closed_gap": 0, "truncated": 0}
+    excluded = {"ended_in_close": 0, "closed_gap": 0, "truncated": 0, "resolved_only": 0}
     for case_id, case_records in by_case.items():
         case_records.sort(key=cfht_sort_key)
         index, total = 0, len(case_records)
@@ -436,13 +436,20 @@ def mode_down_intervals(records: list[dict]) -> dict:
                 excluded["ended_in_close"] += 1
             elif before is not None and get(before, ACTION) == CASE_CLOSED:
                 excluded["closed_gap"] += 1
+            elif resolved_statuses and all(
+                    get(r, "FLAGS__Case_Status__c") in resolved_statuses for r in wait):
+                excluded["resolved_only"] += 1
             elif before is None and not _is_first_record(wait[0]):
                 excluded["truncated"] += 1
             else:
                 waits.append({
                     "case": case_id,
                     "records": len(wait),
-                    "bh": sum(to_float(get(r, BH)) or 0.0 for r in wait),
+                    # Time in a status the person named as resolved isn't the
+                    # customer's move; drop it without splitting the wait (same rule
+                    # as age_decompose --resolved-statuses).
+                    "bh": sum(to_float(get(r, BH)) or 0.0 for r in wait
+                              if get(r, "FLAGS__Case_Status__c") not in resolved_statuses),
                     "ended_by": get(wait[-1], ACTION) or "(unknown)",
                 })
 
@@ -525,7 +532,7 @@ def render(payload: dict) -> None:
         ex = payload["excluded"]
         print(f"waits {payload['waits']} ({payload['split_waits']} spanned more than one record) | "
               f"excluded: ended in close {ex['ended_in_close']}, closed gap {ex['closed_gap']}, "
-              f"window-cut {ex['truncated']}")
+              f"window-cut {ex['truncated']}, resolved-only {ex['resolved_only']}")
         print("ended by: " + ", ".join(f"{k} {v}" for k, v in sorted(payload["ended_by"].items())) + "\n")
         print(f"n {stats.get('n')} | median {fnum(stats.get('median'))} BH "
               f"| mean {fnum(stats.get('mean'))} BH | worst gap "
@@ -551,6 +558,9 @@ def main() -> int:
     parser.add_argument("--stall-bar", type=float, default=None,
                         help="worst-run: org ET3 offset in BH from Preflight "
                              "(FLAGS__TimeOffset3__c). Never hardcode this.")
+    parser.add_argument("--resolved-statuses", default="",
+                        help="down-intervals: comma list of statuses meaning resolved, waiting "
+                             "to close; their time is dropped from customer waits")
     parser.add_argument("--utc-offset", type=float, default=0.0,
                         help="followup-split: the rep's UTC offset in hours (e.g. -5 for US "
                              "Eastern standard time) so batching days are local days")
@@ -564,7 +574,8 @@ def main() -> int:
             return 1
 
         if args.mode == "down-intervals":
-            payload = mode_down_intervals(records)
+            resolved = frozenset(x.strip() for x in args.resolved_statuses.split(",") if x.strip())
+            payload = mode_down_intervals(records, resolved)
             payload["warnings"] = []
         else:
             runs = build_runs(records)

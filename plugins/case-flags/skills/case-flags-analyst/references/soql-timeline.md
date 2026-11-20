@@ -11,10 +11,11 @@ Pull the full CFHT history for one case, in order, with everything needed for co
 This query is the lazy probe when D is the session's first CFHT touch:
 
 ```sql
-SELECT Id, CreatedDate, FLAGS__Case_Flag_History_Number__c, FLAGS__Start__c, FLAGS__End__c,
-       FLAGS__Flag_Set__c, FLAGS__Flag_Level_BH__c, FLAGS__Event__c, FLAGS__Action__c, FLAGS__Reason__c,
-       FLAGS__Owner__c, FLAGS__Owner_Name__c, FLAGS__Queue_Id__c, FLAGS__Case_Status__c,
-       FLAGS__Aging_Speed__c, FLAGS__Business_Hours_Elapsed__c, FLAGS__Hours_Elapsed__c
+SELECT Id, CreatedDate, FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Case_Flag_History_Number__c,
+       FLAGS__Start__c, FLAGS__End__c, FLAGS__Flag_Set__c, FLAGS__Flag_Level_BH__c, FLAGS__Event__c,
+       FLAGS__Action__c, FLAGS__Reason__c, FLAGS__Owner__c, FLAGS__Owner_Name__c, FLAGS__Queue_Id__c,
+       FLAGS__Case_Status__c, FLAGS__Aging_Speed__c, FLAGS__Business_Hours_Elapsed__c,
+       FLAGS__Hours_Elapsed__c, FLAGS__Business_Hours_in_Age_4__c
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__c = '{CASE_ID}'
 ORDER BY FLAGS__Start__c ASC

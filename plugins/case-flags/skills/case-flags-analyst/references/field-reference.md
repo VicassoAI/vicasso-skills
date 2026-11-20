@@ -127,6 +127,14 @@ closed-gap time. Jobs D, H and I all use this definition: exclude post-resolutio
 from customer turnaround (Job H) and from customer-court totals (Job D vitals); Job I reports both
 separately.
 
+Two measures that look alike but answer different questions:
+- **Job I / Job D customer-court time and waits** count every customer-court stretch, including one
+  that ended at an earlier close on a reopened case. That time was spent waiting on the customer.
+- **Job H turnaround** (`run_stitch.py --mode down-intervals`) leaves out any wait that ended in a
+  close, because nobody replied and so it isn't a turnaround.
+
+Both take `--resolved-statuses`. Don't compare one with the other directly.
+
 **Close events come in two shapes (verified live).** The record that ends at a case close always has
 `FLAGS__Action__c = 'Case Closed'`, but its `Event` depends on the flag state at close time:
 `Event = 'Flag Cleared'` if the case closed while flagged (the housekeeping clear), or

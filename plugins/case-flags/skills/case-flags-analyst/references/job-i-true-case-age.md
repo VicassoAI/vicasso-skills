@@ -68,7 +68,7 @@ Every CFHT interval lands in exactly one bucket. The script owns the walk: `scri
 | ↳ of which **in a queue** | Waiting with no named owner | flag up and `Queue_Id__c` populated |
 | ↳ of which **past SLA** | Time in the L4 band | `Business_Hours_in_Age_4__c` on flag-up intervals. **Never** the calendar-band `Hours_in_Age_4__c` / `Case.FLAGS__Hours_Age_4__c`: those apply the thresholds in calendar hours (one live case showed 80 h "past SLA" against 0 BH) |
 | **Customer court** | We are waiting on them | `Flag_Set = false`, not one of the next two |
-| **Post-resolution** | The final wait before the case closed | the flag-down interval that ends in the **final** `Action = 'Case Closed'` |
+| **Post-resolution** | The final wait before the case closed | the flag-down **stretch** that ends in the **final** `Action = 'Case Closed'` (all contiguous flag-down records, so a status change minutes before the close doesn't leave a stub customer wait), plus flag-down time in any `--resolved-statuses` |
 | **Closed gap** | The case sat closed, then reopened | flag-down interval starting right after a **non-final** close |
 | **After close** | Work done while the case stayed closed | every interval **after** the final close; flag-up time inside it is reported separately |
 
@@ -138,6 +138,25 @@ For medians, segments or the finer buckets, pull §11.2 rows plus §11.3, then
 - **Calendar vs business gap:** calendar hours per BH. High values mean a case aged mostly outside
   working hours (weekends, overnight); that is exposure, not neglect.
 - **Reopened** count. Recurrence detail belongs to Job E.
+
+### Waits on each side (any lens)
+
+Every case row also counts the back-and-forth:
+- **Customer waited on us:** each contiguous flag-up stretch inside Salesforce's Age is one wait. The
+  script reports the count, how many ended in a genuine reply, and the average and longest wait.
+- **We waited on the customer:** each contiguous flag-down stretch of customer-court time is one wait,
+  stitched across status and owner changes. Resolved-status time inside it is left out without
+  splitting it. A close, a closed gap or after-close time ends it. The script reports the count, how
+  many were ended by the Follow-Up Process (the customer still hadn't replied), and the average and
+  longest wait.
+
+Wait totals always equal the our-court and customer-court buckets (built in the same pass). Use them to
+tell the case shapes apart:
+- **Many short rounds:** an old case driven by back-and-forth.
+- **Few long silences:** a customer who only moves when the follow-up nudges them.
+- **Slow replies on our side:** a long average or longest wait on us.
+
+Cohort output gives the per-case medians.
 
 ### Time in status (any lens, needs `Track_Case_Status__c`)
 

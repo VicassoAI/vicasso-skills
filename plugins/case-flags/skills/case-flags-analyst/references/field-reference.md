@@ -120,7 +120,7 @@ time is always zero" — rather than a missing column. This happened once during
 treat a uniform, no-variance result across an entire population as a signal to check the field list
 before trusting it.
 
-**Post-resolution time, defined once.** The flag-down interval that ends in a case's **final** close
+**Post-resolution time, defined once.** The flag-down stretch (all contiguous flag-down records) that ends in a case's **final** close
 (`Action = 'Case Closed'`, `Flag_Set = false`) is the resolved-but-not-closed dwell. Earlier closes on a
 reopened case end customer-court stretches, and the time after them, until the flag next goes up, is
 closed-gap time. Jobs D, H and I all use this definition: exclude post-resolution and closed-gap time

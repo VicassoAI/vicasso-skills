@@ -12,7 +12,7 @@ Buckets (every CFHT interval lands in exactly one top-level bucket):
     of which queue       flag up while a queue held the case (Queue_Id populated)
     of which past_sla    flag up time in the L4 band (Business_Hours_in_Age_4)
   customer_court   flag DOWN -- we are waiting on the customer
-  post_resolution  the flag-down interval that ENDS in the case's final close, plus any
+  post_resolution  the flag-down STRETCH that ends in the case's final close, plus any
                    flag-down interval in a status passed via --resolved-statuses
                    (e.g. "Pending Closure": resolved, waiting out a close timer)
                    (Action = 'Case Closed', Flag_Set = false): resolved, not yet closed
@@ -172,6 +172,16 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
     speeds: list[str] = []
     owners: list[str] = []
     handoffs = 0
+    # Waits, built in the same pass as the buckets so their totals equal the buckets.
+    #   our wait       = a contiguous stretch of our_court records (the customer waited
+    #                    on us once); "reply" when it ends in a genuine clear.
+    #   customer wait  = a contiguous stretch of customer_court records, stitched across
+    #                    status/owner changes. Time in a --resolved-statuses status inside
+    #                    it is excluded but does not split it; a close, a closed gap,
+    #                    after-close time or the flag going up ends it.
+    our_waits: list[dict] = []
+    cust_waits: list[dict] = []
+    seg: str | None = None
 
     for i, rec in enumerate(records):
         rec_bh = to_float(get(rec, BH))
@@ -216,6 +226,41 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
         bh[bucket] += rec_bh
         cal[bucket] += rec_cal
 
+        if bucket == "our_court":
+            if seg != "our":
+                our_waits.append({"bh": 0.0, "reply": False})
+                seg = "our"
+            our_waits[-1]["bh"] += rec_bh
+            our_waits[-1]["reply"] = (get(rec, EVENT) == "Flag Cleared"
+                                      and get(rec, ACTION) != CASE_CLOSED)
+        elif bucket == "customer_court":
+            if seg != "cust":
+                cust_waits.append({"bh": 0.0, "cal": 0.0, "ended_by": None})
+                seg = "cust"
+            cust_waits[-1]["bh"] += rec_bh
+            cust_waits[-1]["cal"] += rec_cal
+            cust_waits[-1]["ended_by"] = get(rec, ACTION)
+        elif i == final_close and seg == "cust":
+            # The flag-down STRETCH that ends in the final close is the post-resolution
+            # dwell, not just its last record: a status change minutes before the close
+            # (seen live) would otherwise leave a stub "customer wait" behind. Same rule
+            # run_stitch down-intervals applies.
+            tail = cust_waits.pop()
+            bh["customer_court"] -= tail["bh"]
+            cal["customer_court"] -= tail["cal"]
+            bh["post_resolution"] += tail["bh"]
+            cal["post_resolution"] += tail["cal"]
+            seg = None
+        elif bucket == "post_resolution" and i != final_close:
+            # Resolved-status time: skip it inside a customer wait, but the flag went
+            # down, so an our-wait is over.
+            if seg == "our":
+                seg = None
+        else:
+            seg = None
+        if get(rec, ACTION) == CASE_CLOSED:
+            seg = None
+
         if get(rec, EVENT) == OWNER_CHANGED:
             handoffs += 1
         owner = get(rec, OWNER)
@@ -228,6 +273,12 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
 
     returns = sum(1 for k, o in enumerate(owners) if o in owners[:k])
     first = records[0] if records else {}
+
+    def wait_summary(waits: list[dict]) -> dict:
+        values = [w["bh"] for w in waits]
+        return {"n": len(values), "total_bh": sum(values),
+                "avg_bh": (sum(values) / len(values)) if values else None,
+                "max_bh": max(values) if values else None}
     return {
         "case": case_id,
         "case_number": get(first, "FLAGS__Case__r.CaseNumber"),
@@ -247,6 +298,11 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
             "unknown" if flagged_now is None else ("our_court" if flagged_now else "customer_court")),
         "closes": len(close_idx),
         "is_closed": is_closed,
+        "waits_on_us": {**wait_summary(our_waits),
+                        "replies": sum(1 for w in our_waits if w["reply"])},
+        "waits_on_customer": {**wait_summary(cust_waits),
+                              "ended_by_followup": sum(1 for w in cust_waits
+                                                       if w["ended_by"] == "Follow-Up Process")},
         "handoffs": handoffs,
         "owner_returns": returns,
         "history_start": get(first, START),
@@ -382,6 +438,11 @@ def mode_cohort(rows: list[dict], group_by: str | None) -> dict:
             "reopened": sum(1 for m in members if m["closes"] > 1),
             "worked_after_close": sum(1 for m in members if m["cal"]["after_close"] > CALENDAR_TOLERANCE_H),
             "mixed_speeds": sum(1 for m in members if m["mixed_speeds"]),
+            # Per-case wait counts and average wait length, one value per case.
+            "waits_on_us_per_case": describe([m["waits_on_us"]["n"] for m in whole]),
+            "avg_wait_on_us_bh": describe([m["waits_on_us"]["avg_bh"] for m in whole]),
+            "waits_on_customer_per_case": describe([m["waits_on_customer"]["n"] for m in whole]),
+            "avg_wait_on_customer_bh": describe([m["waits_on_customer"]["avg_bh"] for m in whole]),
             "calendar_per_bh": describe(ratio),
         }
     return {"mode": "cohort", "group_by": group_by, "groups": out}
@@ -474,6 +535,18 @@ def render_factory(bh_per_day: float | None):
                                "History"]))
             if len(payload["cases"]) > 40:
                 print(f"\n+{len(payload['cases']) - 40} more (use --json)")
+            wrows = []
+            for r in payload["cases"][:40]:
+                us, cu = r["waits_on_us"], r["waits_on_customer"]
+                wrows.append([
+                    r.get("case_number") or r["case"],
+                    f"{us['n']} ({us['replies']} replies)", fnum(us["avg_bh"]), fnum(us["max_bh"]),
+                    f"{cu['n']} ({cu['ended_by_followup']} by follow-up)", fnum(cu["avg_bh"]),
+                    fnum(cu["max_bh"]),
+                ])
+            print("\nWaits (BH; customer waits exclude resolved, closed and after-close time)")
+            print(table(wrows, ["Case", "Customer waited on us", "Avg", "Longest",
+                                "We waited on customer", "Avg", "Longest"]))
         elif mode == "cohort":
             for key, g in sorted(payload["groups"].items()):
                 print(f"\n### {payload['group_by'] or 'Cohort'}: {key} ({g['cases']} cases)")
@@ -493,6 +566,10 @@ def render_factory(bh_per_day: float | None):
                       f"{g['cases_with_owner_return']} | reopened: {g['reopened']} | "
                       f"worked after close: {g['worked_after_close']} | mixed speeds: {g['mixed_speeds']} | "
                       f"calendar h per BH: {fnum(g['calendar_per_bh']['median'])}")
+                print(f"waits per case (median): on us {fnum(g['waits_on_us_per_case']['median'], 0)} "
+                      f"averaging {fnum(g['avg_wait_on_us_bh']['median'])} BH | on customer "
+                      f"{fnum(g['waits_on_customer_per_case']['median'], 0)} averaging "
+                      f"{fnum(g['avg_wait_on_customer_bh']['median'])} BH")
         elif mode == "status":
             rows = [[s, fnum(v["our_court"]), fnum(v["customer_court"])]
                     for s, v in sorted(payload["statuses"].items(),

@@ -138,7 +138,10 @@ the court from `Case.FLAGS__ViewedFlag__c`) and never folded into BH. Pass `--ca
 `IsClosed`; without it, a case with activity after its last close stops the run (exit 2),
 because only `IsClosed` tells a reopened case from one worked while closed. `--bh-per-day` adds a working-days column; the
 script never divides BH by 24. `--resolved-statuses` (comma list, e.g. `"Pending Closure"`)
-moves flag-down time in those statuses into post-resolution.
+moves flag-down time in those statuses into post-resolution. Each case also carries
+`waits_on_us` (count, replies, avg, max) and `waits_on_customer` (count, ended by
+follow-up, avg, max), built in the bucket pass so their totals equal the buckets; case
+mode prints them as a second table and cohort mode gives per-case medians.
 
 ```bash
 python3 age_decompose.py --cfht <cache>/cohort.json --cases cases.json \

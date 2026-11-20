@@ -291,6 +291,13 @@ def describe(values: Sequence[float], min_n: int | None = None) -> dict:
         "p90": percentile(clean, 90),
         "tail_ratio": (avg / med) if med else None,
     }
+    if not med and avg:
+        # mean/median is undefined at a zero median, but a positive mean over a zero
+        # median is the strongest tail there is -- don't let the signal vanish.
+        summary["tail_note"] = (
+            f"median is 0 but mean is {avg:.2f}: a few large values carry the whole total "
+            "(treat as a tail, >= the 1.5x bar)"
+        )
     if min_n is not None and len(clean) < min_n:
         summary["low_confidence"] = (
             f"only {len(clean)} values (threshold {min_n}) -- present as low-confidence"

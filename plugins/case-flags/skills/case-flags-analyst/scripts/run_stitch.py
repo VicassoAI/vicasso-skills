@@ -241,6 +241,18 @@ def mode_ongoing(runs: list[dict]) -> dict:
     }
 
 
+GROUP_FIELDS = {"FLAGS__Owner__c": "owner", "FLAGS__Owner_Name__c": "owner_name"}
+
+
+def _run_group(run: dict, group_by: str | None) -> str:
+    """Group key for a run. Honors the field actually passed to --group-by."""
+    if not group_by:
+        return "all"
+    value = run.get(GROUP_FIELDS[group_by])
+    # A queue-held run has a null Owner__c (verified live); fall back to the name.
+    return str(value or run.get("owner_name") or "(no owner)")
+
+
 def mode_followup_split(runs: list[dict], group_by: str | None, utc_offset: float = 0.0) -> dict:
     """
     Bucket genuine clears by opening trigger, per group.
@@ -256,11 +268,12 @@ def mode_followup_split(runs: list[dict], group_by: str | None, utc_offset: floa
     )
 
     for run in runs:
-        key = (run.get("owner_name") or run.get("owner") or "all") if group_by else "all"
-        bucket = groups[key]
-
+        # Only genuine clears count; checking first means a group with no genuine clears
+        # never appears as an all-zero row.
         if not run["genuine_clear"]:
             continue
+        key = _run_group(run, group_by)
+        bucket = groups[key]
         if run["flagged_at_creation"] or run.get("truncated_start"):
             bucket["excluded_at_creation"] += 1
             continue
@@ -481,8 +494,8 @@ def main() -> int:
     parser.add_argument("--mode", default="ongoing",
                         choices=["runs", "ongoing", "followup-split", "worst-run",
                                  "down-intervals"])
-    parser.add_argument("--group-by", default=None,
-                        help="group followup-split by owner (pass FLAGS__Owner__c)")
+    parser.add_argument("--group-by", default=None, choices=sorted(GROUP_FIELDS),
+                        help="group followup-split by owner Id or owner name")
     parser.add_argument("--stall-bar", type=float, default=None,
                         help="worst-run: org ET3 offset in BH from Preflight "
                              "(FLAGS__TimeOffset3__c). Never hardcode this.")

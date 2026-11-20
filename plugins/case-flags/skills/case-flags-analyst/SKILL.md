@@ -205,16 +205,25 @@ True Case Age (job I):
   Working days: BH ÷ the hours in that calendar's business day (from BusinessHours). Never BH ÷ 24.
 
 Takeaway triggers (job I "Takeaways"; any one earns a case a takeaway line, none means no line):
-  Silent customer:   >= 2 waits on the customer AND >= half of them ended by the Follow-Up Process.
-  Many rounds:       waits on us >= 2x the comparison median (no comparison set: >= 15).
+  Silent customer:   >= 2 waits on the customer ended by the Follow-Up Process AND >= half of them.
+  Many rounds:       waits on us above the comparison set's 90th percentile (no set: >= 15).
   Slow reply:        longest wait on us >= the case's ET3 offset (FLAGS__CaseTimeOffset3__c, the
                      same stall bar as job H), or any time past SLA.
   Long silence:      longest wait on the customer >= 3x the flag-down long-gap bar above (48 BH).
-  Parked:            one status other than the main waiting-on-customer status holds >= 25% of the
-                     BH within Age (e.g. On Hold).
-  Slow to close:     resolved-not-closed >= 25% of the BH within Age.
+  Parked:            FLAG-DOWN time in a status that is not the main waiting-on-customer status,
+                     not a resolved status and not a closed status holds >= 25% of the BH within
+                     Age AND >= the case's ET3 offset (e.g. On Hold, or "Working" with the flag
+                     down). Flag-up time in New/Working is normal work, not parking.
+  Slow to close:     resolved-not-closed >= 1.5x the comparison median among cases that had any
+                     (no set: >= 30 BH). Not a share of Age: a fixed close timer (one live org:
+                     ~20 BH in Pending Closure) dominates short cases and is normal.
+  After close:       >= 1 BH worked after the final close.
   Queue dwell:       queue time >= the case's ET2 offset (it reached L2 before anyone owned it).
-  Lifecycle:         reopened, worked after close, partial history, or mixed aging speeds.
+  Lifecycle:         reopened, partial history, or mixed aging speeds.
+  Pattern, not a takeaway: a trigger that fires on >= 25% of the cases in a review is stated once
+                     for the review (with the count), not repeated as each case's takeaway. A case
+                     still gets a takeaway if some OTHER trigger fires for it.
+  Calibrated 2026-11-20 on 55 live cases: the first draft of these rules fired on 48 of 55.
   Comparison median: the other cases in the same review when there are >= 5; otherwise the org's
                      own trailing-90-day medians if already computed this session; otherwise the
                      fixed fallback above. Never compare across aging speeds raw.

@@ -176,9 +176,12 @@ How to write one:
 - **Neutral, like the rest of the skill.** Describe the shape; don't judge a person. Customer silence
   isn't the customer's failing, and a parked status may be deliberate. Say what's worth checking,
   for example "if On Hold here means parked on our side, the customer share overstates it".
-- **Org-wide patterns are said once.** If a pattern shows up across most cases (one live org had its
-  status still reading "With Customer" during ~60% of waiting-on-us time on every case), say it once
-  for the review, not on every case.
+- **Patterns are said once.** A trigger that fires on a quarter or more of the cases in a review is a
+  pattern, not an exception: state it once for the review with its count, and don't repeat it as each
+  case's takeaway. The same goes for things like a status still reading "With Customer" during ~60% of
+  waiting-on-us time on every case (one live org).
+- **Group them in long reviews.** With many cases, group takeaways by kind (slow replies, long silences,
+  slow to close, lifecycle) with the case links, rather than one paragraph per case.
 - **One sentence per case.** If more than one matters, use a second sentence, not a list.
 
 ### Time in status (any lens, needs `Track_Case_Status__c`)

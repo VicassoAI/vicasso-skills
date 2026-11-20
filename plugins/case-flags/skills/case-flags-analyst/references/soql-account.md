@@ -104,10 +104,13 @@ ORDER BY FLAGS__Case__c ASC, FLAGS__Start__c ASC
 ```
 `CaseNumber` is fine in this **detail** (non-aggregate) query — the grouping restriction only bites in
 aggregate queries. Worst wait = longest contiguous `Flag_Set = true` **run** (stitch runs; a per-interval
-MAX understates a split cycle). Customer turnaround = median of `Flag_Set = false` interval BH **excluding**
-rows with `FLAGS__Action__c = 'Case Closed'` (the post-resolution dwell) and the closed-gap rows that follow
-a close (pull `FLAGS__Case_Flag_History_Number__c` and walk each case in order; `scripts/age_decompose.py`
-identifies both); their worst gap = max of that set.
+MAX understates a split cycle). Customer turnaround is measured **per wait**, the same way: stitch
+contiguous `Flag_Set = false` records into one wait (a status or owner change mid-wait would otherwise
+count as two short waits and flatter the customer). Exclude waits that end in a close (`Action = 'Case
+Closed'`), closed-gap waits (starting right after a close) and window-cut waits. Turnaround is the median
+of the remaining wait totals; their worst gap is the max. `scripts/run_stitch.py --mode down-intervals`
+does all of this. Pull `FLAGS__Case_Flag_History_Number__c` so it can order ties and spot window-cut
+waits.
 
 **10.7 Currently in their court (snapshot, no window):** open cases for the account with no flag up now:
 ```sql

@@ -69,7 +69,7 @@ describe separately. Modes:
 | `ongoing` | field-ref (a)+(b), H §10.3 | both documented methods side by side |
 | `followup-split` | followup-time-investment, C/E | follow-up vs other genuine clears + batching gap |
 | `worst-run` | H §10.6/§10.9 | longest continuous wait, concentration, stall vs volume |
-| `down-intervals` | H customer turnaround | flag-down stats, post-resolution dwell excluded |
+| `down-intervals` | H customer turnaround | per-wait flag-down stats; waits ending in a close, closed-gap and window-cut waits excluded |
 
 Runs beginning at a case's first record are flagged `flagged_at_creation` and excluded from
 the follow-up split rather than guessed at. Genuine clears exclude the

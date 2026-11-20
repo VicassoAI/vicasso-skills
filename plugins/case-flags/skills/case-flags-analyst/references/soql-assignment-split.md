@@ -55,8 +55,11 @@ standard Salesforce audit trail rather than trusting the package's own bookkeepi
 SELECT CaseId, Field, OldValue, NewValue, CreatedById, CreatedBy.Name, CreatedDate
 FROM CaseHistory
 WHERE Field = 'Owner'
+  AND CaseId IN ({CASE_IDS})
   AND CreatedDate >= {WINDOW_START}
   AND CreatedDate <= {WINDOW_END}
 ```
+Scope it to the population's cases (`{CASE_IDS}` from §9.1, batched at ~200). Without that filter it pulls
+every owner change in the org for the window.
 Note: `OldValue`/`NewValue` cannot appear in the WHERE clause (`INVALID_FIELD` error) — filter on
 those in code after pulling by `Field` and `CreatedDate` only.

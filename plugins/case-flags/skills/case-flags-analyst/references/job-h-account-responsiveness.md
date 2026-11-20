@@ -51,7 +51,7 @@ Lead the **"how they experienced us"** side with the three reads you asked for, 
 
 Then the **"how responsive the account has been"** side (their court, `Flag_Set = false`):
 
-- *Typical turnaround* — median of flag-down interval business-hours, **excluding the trailing
+- *Typical turnaround* — median business hours **per wait** (contiguous flag-down records stitched together, `scripts/run_stitch.py --mode down-intervals`), **excluding the trailing
   post-resolution interval** (a down-interval whose `FLAGS__Action__c = 'Case Closed'`) **and any closed-gap
   time** (flag-down records after a close, until the flag next goes up; see `references/field-reference.md`).
   Otherwise a long pending-closure dwell, or weeks a case sat closed before the customer wrote back,

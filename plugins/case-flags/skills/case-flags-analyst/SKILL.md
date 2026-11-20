@@ -42,7 +42,7 @@ section. **Read only the SOQL file(s) your job needs.**
 | § | File | Covers |
 |---|---|---|
 | §1 | `references/soql-preflight.md` | Preflight config read, plus the `{UID}` / `{CF_SCOPE}` placeholder conventions every other SOQL file uses |
-| §2–§4 | `references/soql-my-day.md` | Job A — flagged rings, follow-ups due today, stalest open cases |
+| §2–§4 | `references/soql-my-day.md` | Job A — flagged rings (incl. queue membership via groups/roles), follow-ups due today, overdue follow-ups, stalest open cases |
 | §5 | `references/soql-overload.md` | Job C — initial median, `labor_per_clear`, company-vs-customer split, intraday forecast |
 | §6 | `references/soql-timeline.md` | Jobs D, E — single-case CFHT pull, compression, recurrence |
 | §7 | `references/soql-team-view.md` | Job B — every roster input bulked across all direct reports |

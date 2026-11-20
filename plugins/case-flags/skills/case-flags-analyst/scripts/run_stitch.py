@@ -19,8 +19,9 @@ Modes
   followup-split  genuine clears bucketed by opening trigger (Follow-Up Process vs
                   other), per owner, plus the same-day batching gap
   worst-run       longest run per case and overall (job-h worst wait)
-  down-intervals  customer-court turnaround: flag-DOWN interval stats, excluding the
-                  trailing post-resolution dwell
+  down-intervals  customer-court turnaround PER WAIT: contiguous flag-down records
+                  stitched into one wait (same idea as flag-up runs), excluding
+                  waits that end in a close, closed-gap waits, and window-cut waits
 
 Input: JSON from references/soql-followup-investment.md §8 (or references/soql-account.md
 §10.6 / references/soql-timeline.md §6), ordered by case then Start.
@@ -387,27 +388,74 @@ def mode_worst_run(runs: list[dict], stall_bar: float | None) -> dict:
 
 def mode_down_intervals(records: list[dict]) -> dict:
     """
-    Customer-court turnaround: flag-DOWN interval stats.
+    Customer-court turnaround, one value per WAIT.
 
-    Excludes the trailing post-resolution dwell (Action = 'Case Closed'), which would
-    otherwise inflate the account's apparent slowness with pending-closure time.
+    A wait is a maximal run of contiguous Flag_Set = false records for one case. A
+    status or owner change in the middle of a wait splits it across records; counting
+    per record would turn one 3-day wait into several short ones and make the customer
+    look faster than they are (the same trap field-reference.md describes for flag-up
+    time).
+
+    Excluded, by reason (references/field-reference.md "Post-resolution time"):
+      ended_in_close  the wait ends at a close (Action = 'Case Closed'): nobody replied,
+                      the case closed. On the final close this is the post-resolution
+                      dwell; on an earlier close it is still not a turnaround.
+      closed_gap      the wait starts right after a close: the case sat closed.
+      truncated       the wait starts at the first record of the pull but not of the
+                      case (history number > 1): the window cut it short.
+    Kept waits are tagged by what ended them (Email Received vs Follow-Up Process...),
+    since a follow-up re-flag means the customer still hadn't replied.
     """
-    require_columns(records, [FLAG_SET, ACTION, BH], "run_stitch down-intervals")
+    require_columns(records, [CASE, START, FLAG_SET, ACTION, BH], "run_stitch down-intervals")
 
-    values, excluded = [], 0
+    by_case: dict[str, list[dict]] = defaultdict(list)
     for record in records:
-        if truthy(get(record, FLAG_SET)):
-            continue
-        if get(record, ACTION) == CASE_CLOSED:
-            excluded += 1
-            continue
-        value = to_float(get(record, BH))
-        if value is not None:
-            values.append(value)
+        if get(record, CASE):
+            by_case[get(record, CASE)].append(record)
 
+    waits: list[dict] = []
+    excluded = {"ended_in_close": 0, "closed_gap": 0, "truncated": 0}
+    for case_id, case_records in by_case.items():
+        case_records.sort(key=cfht_sort_key)
+        index, total = 0, len(case_records)
+        while index < total:
+            if truthy(get(case_records[index], FLAG_SET)):
+                index += 1
+                continue
+            begin = index
+            while index < total and not truthy(get(case_records[index], FLAG_SET)):
+                index += 1
+                # A close ends the wait even when the flag stays down: the time after it
+                # is closed-gap time, a different thing (seen in reopened cases).
+                if get(case_records[index - 1], ACTION) == CASE_CLOSED:
+                    break
+            wait = case_records[begin:index]
+            before = case_records[begin - 1] if begin > 0 else None
+
+            if get(wait[-1], ACTION) == CASE_CLOSED:
+                excluded["ended_in_close"] += 1
+            elif before is not None and get(before, ACTION) == CASE_CLOSED:
+                excluded["closed_gap"] += 1
+            elif before is None and not _is_first_record(wait[0]):
+                excluded["truncated"] += 1
+            else:
+                waits.append({
+                    "case": case_id,
+                    "records": len(wait),
+                    "bh": sum(to_float(get(r, BH)) or 0.0 for r in wait),
+                    "ended_by": get(wait[-1], ACTION) or "(unknown)",
+                })
+
+    values = [w["bh"] for w in waits]
+    ended_by: dict[str, int] = defaultdict(int)
+    for w in waits:
+        ended_by[w["ended_by"]] += 1
     return {
         "mode": "down-intervals",
-        "excluded_post_resolution": excluded,
+        "waits": len(waits),
+        "split_waits": sum(1 for w in waits if w["records"] > 1),
+        "excluded": excluded,
+        "ended_by": dict(ended_by),
         "turnaround": describe(values),
         "worst_gap_bh": max(values) if values else None,
     }
@@ -474,7 +522,11 @@ def render(payload: dict) -> None:
 
     elif mode == "down-intervals":
         stats = payload["turnaround"]
-        print(f"excluded post-resolution dwell rows: {payload['excluded_post_resolution']}\n")
+        ex = payload["excluded"]
+        print(f"waits {payload['waits']} ({payload['split_waits']} spanned more than one record) | "
+              f"excluded: ended in close {ex['ended_in_close']}, closed gap {ex['closed_gap']}, "
+              f"window-cut {ex['truncated']}")
+        print("ended by: " + ", ".join(f"{k} {v}" for k, v in sorted(payload["ended_by"].items())) + "\n")
         print(f"n {stats.get('n')} | median {fnum(stats.get('median'))} BH "
               f"| mean {fnum(stats.get('mean'))} BH | worst gap "
               f"{fnum(payload.get('worst_gap_bh'))} BH")

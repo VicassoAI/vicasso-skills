@@ -14,7 +14,7 @@ Conventions used below:
   the CFHT form fails on Case, and CFHT does contain records for cases not currently enabled (verified
   live: 19 in one selective org).
 - Other placeholders: `{CASE_ID}` / `{CASE_IDS}` (quoted 18-char Ids), `{REP_ID}` (a User Id),
-  `{QUEUE_IDS}`, `{AID}` (Account Id), `{TRANSITION_RECORD_IDS}` (CFHT Ids), and
+  `{QUEUE_IDS}`, `{ROLE_ID}` / `{ANCESTOR_ROLE_IDS}` (UserRole Ids), `{GROUP_IDS}` / `{MEMBER_IDS}` (Group and User Ids, §2 Ring 3), `{AID}` (Account Id), `{TRANSITION_RECORD_IDS}` (CFHT Ids), and
   `{WINDOW_START}` / `{WINDOW_END}` (unquoted ISO datetimes, e.g. `2026-08-01T00:00:00Z`). `{TERM}`
   is user text inside `LIKE '%…%'`: escape `'` as `\'`.
 

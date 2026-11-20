@@ -12,7 +12,9 @@ Buckets (every CFHT interval lands in exactly one top-level bucket):
     of which queue       flag up while a queue held the case (Queue_Id populated)
     of which past_sla    flag up time in the L4 band (Business_Hours_in_Age_4)
   customer_court   flag DOWN -- we are waiting on the customer
-  post_resolution  the flag-down interval that ENDS in the case's final close
+  post_resolution  the flag-down interval that ENDS in the case's final close, plus any
+                   flag-down interval in a status passed via --resolved-statuses
+                   (e.g. "Pending Closure": resolved, waiting out a close timer)
                    (Action = 'Case Closed', Flag_Set = false): resolved, not yet closed
   closed_gap       flag-down intervals that START right after a non-final close and
                    run until the reopen -- the case sat closed, then came back
@@ -139,7 +141,8 @@ def infer_closed(case_id: str, records: list[dict]) -> bool:
 
 
 def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = None,
-                   flagged_now: bool | None = None) -> dict:
+                   flagged_now: bool | None = None,
+                   resolved_statuses: frozenset = frozenset()) -> dict:
     """
     Walk one case's intervals in Start order and assign each to a bucket.
 
@@ -195,7 +198,9 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
                 queue_bh += rec_bh
                 queue_cal += rec_cal
             past_sla_bh += to_float(get(rec, BH_L4)) or 0.0
-        elif i == final_close:
+        elif i == final_close or get(rec, STATUS) in resolved_statuses:
+            # Flag down in a resolved status: nobody is waiting on anybody, the case is
+            # done and waiting to close. Org-specific, so only when the caller says so.
             bucket = "post_resolution"
         elif in_gap:
             bucket = "closed_gap"
@@ -248,7 +253,8 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
     }
 
 
-def decompose_all(cfht: list[dict], cases: list[dict] | None = None) -> list[dict]:
+def decompose_all(cfht: list[dict], cases: list[dict] | None = None,
+                  resolved_statuses: frozenset = frozenset()) -> list[dict]:
     require_columns(cfht, [CASE, START, END, FLAG_SET, EVENT, ACTION, BH, HRS], "age_decompose")
     closed, flagged = {}, {}
     for c in cases or []:
@@ -261,7 +267,7 @@ def decompose_all(cfht: list[dict], cases: list[dict] | None = None) -> list[dic
         if get(rec, CASE):
             by_case[get(rec, CASE)].append(rec)
     try:
-        return [decompose_case(cid, recs, closed.get(cid), flagged.get(cid))
+        return [decompose_case(cid, recs, closed.get(cid), flagged.get(cid), resolved_statuses)
                 for cid, recs in by_case.items()]
     except ValueError as error:
         raise SystemExit(_invalid(str(error)))
@@ -521,6 +527,10 @@ def main() -> int:
                                    "IsClosed, rollups, segment fields)")
     p.add_argument("--mode", default="case", choices=["case", "cohort", "status", "backlog"])
     p.add_argument("--group-by", help="cohort: Case field to slice by (e.g. Priority, Origin)")
+    p.add_argument("--resolved-statuses", default="",
+                   help="case/cohort: comma list of statuses that mean resolved, waiting to "
+                        "close (e.g. 'Pending Closure'). Flag-down time in them counts as "
+                        "post_resolution instead of customer_court. Flag-up time is unchanged.")
     p.add_argument("--customer-statuses", default="",
                    help="status: comma list of statuses that mean 'waiting on customer'")
     p.add_argument("--edges", default="1,3,7,30",
@@ -555,7 +565,8 @@ def main() -> int:
                 payload = mode_status(cfht, statuses)
             else:
                 cases = load_records(args.cases) if args.cases else None
-                rows = decompose_all(cfht, cases)
+                resolved = frozenset(x.strip() for x in args.resolved_statuses.split(",") if x.strip())
+                rows = decompose_all(cfht, cases, resolved)
                 warn = check_variance([r["bh_total"] for r in rows], "total BH per case")
                 if warn:
                     warnings.append(warn)

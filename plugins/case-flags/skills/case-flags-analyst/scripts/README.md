@@ -137,7 +137,8 @@ open cases the time since the last change is reported separately (calendar hours
 the court from `Case.FLAGS__ViewedFlag__c`) and never folded into BH. Pass `--cases` with
 `IsClosed`; without it, a case with activity after its last close stops the run (exit 2),
 because only `IsClosed` tells a reopened case from one worked while closed. `--bh-per-day` adds a working-days column; the
-script never divides BH by 24.
+script never divides BH by 24. `--resolved-statuses` (comma list, e.g. `"Pending Closure"`)
+moves flag-down time in those statuses into post-resolution.
 
 ```bash
 python3 age_decompose.py --cfht <cache>/cohort.json --cases cases.json \

@@ -85,6 +85,13 @@ a parking spot, or closed cases that customers still write in on. The Case band 
 after-close flag-up time; the script accounts for that in its cross-check.
 
 `Action = 'Case Closed'` is the close test regardless of `Event` (see `references/field-reference.md`).
+**Org-specific resolved statuses.** Many orgs have a status that means "resolved, waiting out a close
+timer" (one live org: "Pending Closure"). Flag-down time in that status isn't the customer's move. Pass
+it with `--resolved-statuses "Pending Closure"` so that time counts as post-resolution wherever it occurs,
+not only in the final interval. Flag-up time in that status stays in our court, because the customer
+wrote back. Read the status names off `--mode status`, and ask the person before applying this: it's
+their definition, not the package's.
+
 The trailing post-resolution interval is kept separate because a long "resolved, waiting to close"
 dwell inflates Age without anyone waiting on anyone. Present it neutrally: it may be a deliberate
 confirmation window.

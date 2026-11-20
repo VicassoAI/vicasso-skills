@@ -199,6 +199,11 @@ Memorial Day, Juneteenth, Jul 3 and Labor Day):
   interval's calendar.
 - **Holidays apply only where attached.** One calendar didn't skip Juneteenth because the holiday
   wasn't attached to it.
+- **Two further holiday sets, 2026-11-20:** 15 cases spanning Labor Day (13 on a 10-hour calendar, 2 on
+  a 6-hour one) and 15 spanning the Jul 3 observed holiday. 30 of 30 matched with the holiday excluded,
+  to within 0.005 BH. Each holiday removed exactly one working day's hours: 10 BH on the 10-hour
+  calendar and 6 on the 6-hour one. Without the exclusion, every case would have been off by that
+  amount.
 
 `Case.FLAGS__Aging_Speed__c` holds only the **latest** speed.
 

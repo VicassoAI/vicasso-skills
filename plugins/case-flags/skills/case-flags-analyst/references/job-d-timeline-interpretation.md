@@ -35,11 +35,20 @@ than `Local Automation` alone.
   Report which trigger path each reopening took (customer activity vs. Follow-Up Process pulling it back);
   do not editorialize about what it implies.
 
-**Step 3 — build the vitals block** (same shape every time, regardless of lens): case number/subject,
-current status, opened date, closed date if applicable, total age; initial response time
-(`Initial_Response_Business_Hours__c`); count of response cycles and total time-with-company (sum of
-flag-up `Business_Hours_Elapsed__c`, excluding the `Flag Cleared`+`Case Closed` housekeeping interval);
-total time-with-customer (sum of flag-down elapsed, excluding post-resolution and closed-gap time as defined in `references/field-reference.md`; report those separately if non-trivial); handoff count; status-change count (if tracked);
+**Step 3 — build the vitals block** (same shape every time, regardless of lens). It always includes the
+case's **True Case Age**: run `scripts/age_decompose.py --mode case` on the §6 pull plus the Case row
+(see `references/job-i-true-case-age.md`), so a reviewer sees why the case is as old as it is, not just
+how old. The block has:
+- **Identity and age:** case number/subject, current status, opened date, closed date if applicable, and
+  Salesforce's Age.
+- **True Case Age:** the BH within Age split into waiting on us, waiting on the customer, resolved
+  waiting to close, and (when non-zero) closed-gap, after-close and queue time. Give working days where
+  the calendar is known.
+- **Waits:** how many times the customer waited on us (with how many ended in a reply, the average and
+  the longest), and how many times we waited on the customer (with how many the Follow-Up Process ended,
+  the average and the longest).
+- **Responsiveness:** initial response time (`Initial_Response_Business_Hours__c`).
+- **Shape:** handoff count; status-change count (if tracked);
 breach count (how many separate times it reached L4: count contiguous L4 stretches, not L4 records, since one breach can span several records); follow-up-reflag count; **recurrence count** (number of
 close events — `Action = 'Case Closed'`, either Event shape — beyond the first) and, if any, how each
 reopening was triggered; aging speed(s) that
@@ -71,7 +80,10 @@ something worth a second look, never as a finding. Do not speculate about which 
   large flag-down gaps). No interaction-by-interaction detail.
 
 For Coach, Audit, and Prep: always render the vitals block first, then a structured narrative scaled to
-the lens. Personalize is the one exception — no vitals block, just the 50-word paragraph.
+the lens, then a **Takeaway** sentence if the case trips any trigger in SKILL.md's constants (rules in
+`references/job-i-true-case-age.md`, "Takeaways"). No trigger, no takeaway line. Personalize is the one
+exception — no vitals block, just the 50-word paragraph. When a trigger fires there, the paragraph may
+carry the gist in the owner's own voice ("they've only replied when the follow-up nudged them").
 
 **Neutrality guardrail for the Personalize paragraph (and every lens, but easiest to violate here):**
 Because this format compresses several cycles into a short arc, it's tempting to smooth the numbers into
@@ -96,7 +108,7 @@ paragraph and every other lens's narrative. Don't infer gender from a name.
 **Optional compact vitals line for Personalize.** The 50-word paragraph is the default and typically all
 that's needed. If the person is reviewing several of their own cases side by side (rather than asking
 about one case before replying to it), a single compact line of key numbers above the paragraph can help —
-e.g. `Age 18d · 12 cycles · 14.06 BH with-company · 97.16 BH with-customer · max L3`. This is one line, not
+e.g. `Age 18d · 14.1 BH on us (12 waits, avg 1.2) · 97.2 BH on customer (11 waits, avg 8.8) · max L3`. This is one line, not
 the full vitals block, and stays optional rather than default: only add it when the person is scanning
 multiple cases or asks for the numbers alongside the narrative.
 

@@ -109,9 +109,12 @@ fields), then run `age_decompose.py --mode case`. Render:
 1. **One line:** "Salesforce's Age shows 8.1 days. Of the 60.6 business hours inside that, 15.6 were
    waiting on us (none past SLA) and 45 were waiting on the customer."
 2. A small table of the buckets in BH, working days and share.
-3. What drove it: handoffs, owner returns (a case going back to a previous owner), the longest single
+3. The waits on each side (count, replies or follow-up-ended, average, longest), from the script's
+   waits table.
+4. What drove it: handoffs, owner returns (a case going back to a previous owner), the longest single
    wait (`run_stitch.py --mode worst-run`), and reopens. If Job D's narrative is wanted, hand off to it
    rather than duplicating it.
+5. A **takeaway**, only if the case trips a trigger (see "Takeaways" below).
 
 ### (b) Open backlog: "how old is our backlog?" / "what is nobody watching?"
 
@@ -157,6 +160,26 @@ tell the case shapes apart:
 - **Slow replies on our side:** a long average or longest wait on us.
 
 Cohort output gives the per-case medians.
+
+### Takeaways (any per-case output: this job, Job D, multi-case reviews)
+
+When a case has something **outside the normal** about it, end its entry with one **Takeaway:** sentence
+that says what drove the case's age or what to look at. When nothing is unusual, write no takeaway line:
+no filler like "nothing notable", because the absence is the signal. The triggers and their thresholds
+are in SKILL.md's constants ("Takeaway triggers"). Evaluate every trigger; if several fire, lead with the
+one that explains the most time.
+
+How to write one:
+- **Explain, with the numbers.** For example: *"Old because of the number of rounds (27 each way), not
+  slow replies: our waits averaged 0.8 BH."* Or: *"Every customer wait ended only when the follow-up
+  re-flagged it; the customer never wrote back on their own."*
+- **Neutral, like the rest of the skill.** Describe the shape; don't judge a person. Customer silence
+  isn't the customer's failing, and a parked status may be deliberate. Say what's worth checking,
+  for example "if On Hold here means parked on our side, the customer share overstates it".
+- **Org-wide patterns are said once.** If a pattern shows up across most cases (one live org had its
+  status still reading "With Customer" during ~60% of waiting-on-us time on every case), say it once
+  for the review, not on every case.
+- **One sentence per case.** If more than one matters, use a second sentence, not a list.
 
 ### Time in status (any lens, needs `Track_Case_Status__c`)
 

@@ -200,8 +200,24 @@ True Case Age (job I):
   Backlog age buckets (calendar days since CreatedDate): 0–1, 1–3, 3–7, 7–30, 30+.
     Passed to age_decompose.py as --edges 1,3,7,30.
   Forgotten: open, NOT flagged (FLAGS__ViewedFlag__c null) AND no Follow-Up On date.
-  Post-resolution: the flag-down interval ending in the case's FINAL close (Action = 'Case Closed').
+  Post-resolution: the flag-down STRETCH ending in the case's FINAL close (Action = 'Case Closed'),
+    plus flag-down time in any status the person names as resolved (--resolved-statuses).
   Working days: BH ÷ the hours in that calendar's business day (from BusinessHours). Never BH ÷ 24.
+
+Takeaway triggers (job I "Takeaways"; any one earns a case a takeaway line, none means no line):
+  Silent customer:   >= 2 waits on the customer AND >= half of them ended by the Follow-Up Process.
+  Many rounds:       waits on us >= 2x the comparison median (no comparison set: >= 15).
+  Slow reply:        longest wait on us >= the case's ET3 offset (FLAGS__CaseTimeOffset3__c, the
+                     same stall bar as job H), or any time past SLA.
+  Long silence:      longest wait on the customer >= 3x the flag-down long-gap bar above (48 BH).
+  Parked:            one status other than the main waiting-on-customer status holds >= 25% of the
+                     BH within Age (e.g. On Hold).
+  Slow to close:     resolved-not-closed >= 25% of the BH within Age.
+  Queue dwell:       queue time >= the case's ET2 offset (it reached L2 before anyone owned it).
+  Lifecycle:         reopened, worked after close, partial history, or mixed aging speeds.
+  Comparison median: the other cases in the same review when there are >= 5; otherwise the org's
+                     own trailing-90-day medians if already computed this session; otherwise the
+                     fixed fallback above. Never compare across aging speeds raw.
 ```
 
 ---

@@ -8,7 +8,11 @@ With-Customer soft-warning line when applicable) and a **Start here** block, the
 
 **Start here** — the single most urgent case the person *owns* (top of Ring 1). Show full detail and the
 flag timing: account, contact, owner, status, priority, current level, exactly how overdue (or how long
-until breach), the escalation timeline, the aging speed, and the Next Steps text if set.
+until breach), the escalation timeline, the aging speed, and the Next Steps text if set. Add one compact
+True Case Age line from the Case band rollups (no extra CFHT pull needed): BH waiting on us so far, and
+when CFHT is already in hand, the waits each way, e.g. `So far: 3.2 BH on us across 4 waits · 21 BH on
+the customer across 3`. Add a takeaway only if a trigger fires (`references/job-i-true-case-age.md`,
+"Takeaways").
 
 Then six sections (all scoped to the current user, selective-scope applied, in this order):
 

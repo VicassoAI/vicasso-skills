@@ -115,8 +115,8 @@ follow-up date, so nothing will bring it back to anyone's attention). List the o
 links, with owner and status. Forgotten is the actionable list. Present it as "nothing is scheduled to
 surface these", not as blame.
 
-For flagged backlog cases, the band rollups give our-court time so far, excluding the interval still
-running.
+For flagged backlog cases, the band rollups give our-court time up to the last recorded change. The
+time since then isn't in CFHT or the rollups.
 
 ### (c) Closed cohort: "how much of our resolution time is us?"
 
@@ -160,8 +160,19 @@ BH, because that mixes calendar hours with business hours.
 - **Partial history.** If CFHT starts after `Case.CreatedDate` (retention window or pre-install), the
   script warns. Say the breakdown covers only part of Age and keep those cases out of cohort medians, or
   bound the cohort to cases created inside the window. Apply Job G's post-install cutoff the same way.
-- **Open cases.** The running interval has calendar time but no BH yet. The script reports it as
-  "Running cal h". Say it's still running; don't call it zero.
+- **Reopened cases.** Salesforce clears `ClosedDate` on reopen (verified live: open cases with close
+  events in CFHT have a null `ClosedDate`), so their Age runs from creation to now. Only a case that is
+  closed **now** has a final close. Pass `--cases` with `IsClosed`, so a reopened open case's earlier
+  closes count as closed gaps rather than putting everything after them in "after close". Without
+  `--cases`, the script infers the state only when it's unambiguous: no close means open, and history
+  ending on a close means closed. A close followed by more activity stops the run until `IsClosed` is
+  supplied.
+- **Open cases: the current stretch isn't in CFHT.** CFHT writes a record only when something changes.
+  It never writes a running interval (verified live: 0 of 59 open cases had a record with a null
+  `End`). The time from the last record's `End` to now is therefore missing from every CFHT total and
+  from the Case rollups. The script reports it as "Since last change (calendar h, court)". The court
+  comes from `Case.FLAGS__ViewedFlag__c`, so include that field in `--cases`. Business hours aren't
+  recorded for it. Say so, and never fold it into the BH buckets or call it zero.
 - **Neutrality.** Customer-court time is not a customer failing, and post-resolution time is not
   neglect. Report shares and let the numbers speak, just as Job H does.
 - **Links.** Render case numbers as links per SKILL.md.

@@ -115,13 +115,49 @@ def hours_between(a: datetime | None, b: datetime | None) -> float | None:
 # ------------------------------------------------------------------- decomposition
 
 
-def decompose_case(case_id: str, records: list[dict]) -> dict:
-    """Walk one case's intervals in Start order and assign each to a bucket."""
+def infer_closed(case_id: str, records: list[dict]) -> bool:
+    """
+    Current open/closed state when Case.IsClosed was not supplied.
+
+    CFHT never writes a running interval (verified live: 0 of 59 open cases had a record
+    with End null), so "has an open-ended record" cannot tell open from closed. What CAN:
+    no close event -> open; history ends on a close -> closed. A close followed by more
+    activity is either a reopened open case or work on a still-closed case, and only
+    Case.IsClosed can tell those apart.
+    """
+    closes = [i for i, r in enumerate(records) if get(r, ACTION) == CASE_CLOSED]
+    if not closes:
+        return False
+    if closes[-1] == len(records) - 1:
+        return True
+    raise DataError(
+        f"Case {case_id} has activity after its last close: it is either reopened (open) "
+        "or was worked while still closed. Pass --cases with IsClosed so it is bucketed "
+        "correctly (after-close vs closed gap)."
+    )
+
+
+def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = None,
+                   flagged_now: bool | None = None) -> dict:
+    """
+    Walk one case's intervals in Start order and assign each to a bucket.
+
+    is_closed: the case's CURRENT state (Case.IsClosed). A reopened case that is open
+    again still has close events in its history; none of them is "final", so nothing
+    after them is after_close.
+
+    Open cases: CFHT stops at the last transition; the time from the last record's End
+    to now is not in CFHT at all. It is reported as since_last_change_cal (calendar
+    hours; BH is not recorded), in the court given by Case.FLAGS__ViewedFlag__c.
+    """
     records.sort(key=lambda r: parse_dt(get(r, START)) or parse_dt("1900-01-01"))
+    if is_closed is None:
+        is_closed = infer_closed(case_id, records)
 
     close_idx = [i for i, r in enumerate(records) if get(r, ACTION) == CASE_CLOSED]
-    final_close = close_idx[-1] if close_idx else None
-    after_close = {i + 1 for i in close_idx if final_close is not None and i != final_close}
+    final_close = close_idx[-1] if (close_idx and is_closed) else None
+    non_final = {i for i in close_idx if i != final_close}
+    in_gap = False
 
     bh = {b: 0.0 for b in BUCKETS}
     cal = {b: 0.0 for b in BUCKETS}
@@ -137,9 +173,7 @@ def decompose_case(case_id: str, records: list[dict]) -> dict:
         rec_bh = to_float(get(rec, BH))
         rec_cal = to_float(get(rec, HRS))
         if get(rec, END) is None:
-            # The interval still running on an open case: CFHT has no elapsed yet.
-            # Calendar time is measurable; business hours are not, so keep it apart.
-            open_tail_cal += hours_between(parse_dt(get(rec, START)), now_utc()) or 0.0
+            # Not observed in live data, but never let a half-written record count.
             rec_bh, rec_cal = 0.0, 0.0
         rec_bh = rec_bh or 0.0
         rec_cal = rec_cal or 0.0
@@ -162,10 +196,17 @@ def decompose_case(case_id: str, records: list[dict]) -> dict:
             past_sla_bh += to_float(get(rec, BH_L4)) or 0.0
         elif i == final_close:
             bucket = "post_resolution"
-        elif i in after_close:
+        elif in_gap:
             bucket = "closed_gap"
         else:
             bucket = "customer_court"
+
+        # A closed gap runs from a non-final close until the flag next goes up
+        # (the reopen). Several flag-down records can fall inside it.
+        if truthy(get(rec, FLAG_SET)):
+            in_gap = False
+        if i in non_final:
+            in_gap = True
         bh[bucket] += rec_bh
         cal[bucket] += rec_cal
 
@@ -174,6 +215,10 @@ def decompose_case(case_id: str, records: list[dict]) -> dict:
         owner = get(rec, OWNER)
         if owner and (not owners or owners[-1] != owner):
             owners.append(owner)
+
+    if not is_closed and records:
+        last_end = max((parse_dt(get(r, END)) for r in records if get(r, END)), default=None)
+        open_tail_cal = hours_between(last_end, now_utc()) or 0.0
 
     returns = sum(1 for k, o in enumerate(owners) if o in owners[:k])
     first = records[0] if records else {}
@@ -192,21 +237,31 @@ def decompose_case(case_id: str, records: list[dict]) -> dict:
         "speeds": speeds,
         "mixed_speeds": len(speeds) > 1,
         "open_tail_cal": open_tail_cal,
+        "court_now": None if is_closed else (
+            "unknown" if flagged_now is None else ("our_court" if flagged_now else "customer_court")),
         "closes": len(close_idx),
+        "is_closed": is_closed,
         "handoffs": handoffs,
         "owner_returns": returns,
         "history_start": get(first, START),
     }
 
 
-def decompose_all(cfht: list[dict]) -> list[dict]:
+def decompose_all(cfht: list[dict], cases: list[dict] | None = None) -> list[dict]:
     require_columns(cfht, [CASE, START, END, FLAG_SET, EVENT, ACTION, BH, HRS], "age_decompose")
+    closed, flagged = {}, {}
+    for c in cases or []:
+        if get(c, "IsClosed") is not None:
+            closed[get(c, "Id")] = truthy(get(c, "IsClosed"))
+        if "FLAGS__ViewedFlag__c" in c:
+            flagged[get(c, "Id")] = get(c, "FLAGS__ViewedFlag__c") is not None
     by_case: dict[str, list[dict]] = defaultdict(list)
     for rec in cfht:
         if get(rec, CASE):
             by_case[get(rec, CASE)].append(rec)
     try:
-        return [decompose_case(cid, recs) for cid, recs in by_case.items()]
+        return [decompose_case(cid, recs, closed.get(cid), flagged.get(cid))
+                for cid, recs in by_case.items()]
     except ValueError as error:
         raise SystemExit(_invalid(str(error)))
 
@@ -300,15 +355,18 @@ def mode_cohort(rows: list[dict], group_by: str | None) -> dict:
     out = {}
     for key, members in groups.items():
         totals = {b: sum(m["bh"][b] for m in members) for b in BUCKETS}
-        age = sum(totals.values()) or None
-        our = [m["bh"]["our_court"] for m in members]
+        # after_close sits outside Salesforce's Age, so it is not part of the denominator.
+        age = sum(v for b, v in totals.items() if b != "after_close") or None
+        whole = [m for m in members if not m.get("history_gap_h")]
+        our = [m["bh"]["our_court"] for m in whole]
         ratio = [m["cal_total"] / m["bh_total"] for m in members if m["bh_total"] > 0]
         out[key] = {
             "cases": len(members),
             "total_bh": totals,
-            "share": {b: (totals[b] / age if age else None) for b in BUCKETS},
+            "share": {b: (totals[b] / age if age and b != "after_close" else None) for b in BUCKETS},
+            "excluded_partial_history": len(members) - len(whole),
             "controllable_bh": describe(our, min_n=10),
-            "customer_bh": describe([m["bh"]["customer_court"] for m in members], min_n=10),
+            "customer_bh": describe([m["bh"]["customer_court"] for m in whole], min_n=10),
             "past_sla_bh_total": sum(m["past_sla_bh"] for m in members),
             "cases_past_sla": sum(1 for m in members if m["past_sla_bh"] > 0),
             "queue_bh_total": sum(m["queue_bh"] for m in members),
@@ -397,13 +455,14 @@ def render_factory(bh_per_day: float | None):
                     fnum(r["bh"]["our_court"]), fnum(r["queue_bh"]), fnum(r["past_sla_bh"]),
                     fnum(r["bh"]["customer_court"]), fnum(r["bh"]["post_resolution"]),
                     fnum(r["bh"]["closed_gap"]), fnum(r["bh"]["after_close"]),
-                    fnum(r["open_tail_cal"]), r["handoffs"],
+                    (f"{fnum(r['open_tail_cal'])} ({r['court_now']})" if r["court_now"] else ""),
+                    r["handoffs"],
                     ("partial " if r.get("history_gap_h") else "")
                     + ("mixed-speed" if r["mixed_speeds"] else ""),
                 ])
             print(table(rows, ["Case", "Std Age h", "Cal h", "Total BH", "Our BH", "  queue",
                                "  past SLA", "Cust BH", "Post-res", "Closed gap", "After close",
-                               "Running cal h",
+                               "Since last change (cal h, court)",
                                "Handoffs",
                                "History"]))
             if len(payload["cases"]) > 40:
@@ -412,8 +471,11 @@ def render_factory(bh_per_day: float | None):
             for key, g in sorted(payload["groups"].items()):
                 print(f"\n### {payload['group_by'] or 'Cohort'}: {key} ({g['cases']} cases)")
                 rows = [[b, fnum(g["total_bh"][b]),
-                         f"{(g['share'][b] or 0) * 100:.0f}%"] for b in BUCKETS]
+                         "outside Age" if g["share"][b] is None else f"{g['share'][b] * 100:.0f}%"]
+                        for b in BUCKETS]
                 print(table(rows, ["Bucket", "Total BH", "Share of age"]))
+                if g["excluded_partial_history"]:
+                    print(f"({g['excluded_partial_history']} case(s) with partial history left out of the medians)")
                 c = g["controllable_bh"]
                 print(f"controllable (our-court) BH per case: median {fnum(c['median'])} | "
                       f"p90 {fnum(c.get('p90'))} | mean {fnum(c['mean'])} | "
@@ -491,13 +553,14 @@ def main() -> int:
                 statuses = [s.strip() for s in args.customer_statuses.split(",") if s.strip()]
                 payload = mode_status(cfht, statuses)
             else:
-                rows = decompose_all(cfht)
+                cases = load_records(args.cases) if args.cases else None
+                rows = decompose_all(cfht, cases)
                 warn = check_variance([r["bh_total"] for r in rows], "total BH per case")
                 if warn:
                     warnings.append(warn)
                 warnings.extend(structural_warnings(rows))
-                if args.cases:
-                    attach_cases(rows, load_records(args.cases), warnings)
+                if cases:
+                    attach_cases(rows, cases, warnings)
                 payload = mode_case(rows) if args.mode == "case" else mode_cohort(rows, args.group_by)
         payload["warnings"] = warnings
         emit(payload, args.json, render_factory(args.bh_per_day))

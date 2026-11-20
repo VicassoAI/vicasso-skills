@@ -39,7 +39,7 @@ WHERE IsClosed = false AND {OWNER_SCOPE} {CF_SCOPE}
 ## 11.2 Closed cohort — population (lens c)
 
 ```sql
-SELECT Id, CaseNumber, Subject, CreatedDate, ClosedDate, IsClosed, Status, Priority, Origin, Type,
+SELECT Id, CaseNumber, Subject, CreatedDate, ClosedDate, IsClosed, FLAGS__ViewedFlag__c, Status, Priority, Origin, Type,
        Reason, Account.Name, Owner.Name, FLAGS__Aging_Speed__c,
        FLAGS__Initial_Response_Business_Hours__c,
        FLAGS__Business_Hours_Age_1__c, FLAGS__Business_Hours_Age_2__c,

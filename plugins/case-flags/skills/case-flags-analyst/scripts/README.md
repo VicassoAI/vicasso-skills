@@ -132,8 +132,11 @@ Enforced: BH, calendar hours and `End` must be present (silent-zero guard, exit 
 negative elapsed value fails the run (exit `3`). Warned, not fatal: CFHT starting after
 `Case.CreatedDate` (partial history), and our-court BH disagreeing with the Case's
 `Business_Hours_Age_1..4` rollup by more than 0.05 BH. The rollup comparison is an
-independent cross-check, not an identity. Running intervals on open cases are reported
-as calendar hours, never as zero BH. `--bh-per-day` adds a working-days column; the
+independent cross-check, not an identity. CFHT never writes a running interval, so for
+open cases the time since the last change is reported separately (calendar hours, plus
+the court from `Case.FLAGS__ViewedFlag__c`) and never folded into BH. Pass `--cases` with
+`IsClosed`; without it, a case with activity after its last close stops the run (exit 2),
+because only `IsClosed` tells a reopened case from one worked while closed. `--bh-per-day` adds a working-days column; the
 script never divides BH by 24.
 
 ```bash

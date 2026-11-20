@@ -57,7 +57,7 @@ different aging speeds as if equivalent.
 | `FLAGS__Initial_Response_Hours__c` | Hours from opened → initial response |
 | `FLAGS__Initial_Response_Business_Hours__c` | Business hours from opened → initial response. **Source for the initial-response median** |
 | `FLAGS__Case_Flag_Age__c` / `FLAGS__Case_Flag_Business_Age__c` | Hours / business-hours the current flag has been active |
-| `FLAGS__Hours_Age_1__c`…`4__c`, `FLAGS__Business_Hours_Age_1__c`…`4__c` | Rollups of time spent in each band (from CFHT) |
+| `FLAGS__Hours_Age_1__c`…`4__c`, `FLAGS__Business_Hours_Age_1__c`…`4__c` | Rollups of time spent in each band (from CFHT). **Their sum = the case's total flag-up (our-court) time, and `_Age_4` = time past SLA.** Verified live 2026-11-20: 7 of 7 closed cases matched the CFHT flag-up `Business_Hours_Elapsed` sum to within 0.001 BH. They exclude the interval still running on an open case. This is what lets Job I give a no-CFHT read |
 | `FLAGS__Enable_Case_Flags__c` | In a selective-processing org, true = this case is managed by Case Flags |
 | `FLAGS__CaseFlagsBusinessHours__c` | Lookup → `FLAGS__CaseFlagsBusinessHours__c` wrapper |
 
@@ -188,6 +188,28 @@ records** from the set that opened it through the clear that closed it. Two meth
   agent can have 1,000+ flag-up intervals in 90 days — so reserve it for small volumes or when the person
   asks for precision.
 Genuine clears exclude the `Flag Cleared` + `Case Closed` housekeeping rows.
+
+**Holidays are honored.** CFHT `FLAGS__Business_Hours_Elapsed__c` follows the aging speed's
+`BusinessHours` calendar, holidays included. Verified live 2026-11-20: an interval from Thu Jul 2 to Tue
+Jul 7, 2026 on a Mon–Fri 08:00–18:00 calendar counted 19.2 BH, which means the Jul 3 holiday was
+excluded (it would have been 29.2 BH otherwise). The **calendar total** of `FLAGS__Hours_Elapsed__c`
+across a case's records reconciles to the standard Age span (created → closed) whenever CFHT starts at
+case creation.
+
+---
+
+## Standard Salesforce age and history (for comparison only — Job I)
+
+These are standard features, not Case Flags fields. They appear here so the skill never misstates what
+it is comparing against. Sources: Salesforce Help *Fields Available for Case Reports*, and KB 000387290,
+000382808 and 000388264 (read 2026-11-20).
+
+| Item | Behaviour |
+|---|---|
+| Report **Age** | Open: created → now; closed: created → closed. Shown in days, hours or minutes. **Ignores holidays.** Report-only, not a real field |
+| **Business Hours Age** | Must be **activated by Salesforce Support**; unavailable when default business hours are 24/7. Standard Case report types only (not custom report types). **Can't be filtered or bucketed.** Hidden from users without access to Closed Date/Time. Its "days" = **BH ÷ 24** (126 BH shows as 5.25 days). Ignores holidays |
+| Case History report "Business Hours" / "Business Hours Since Similar Change" | BH since the last update, or since the same field last changed; ignores holidays |
+| `CaseHistory` object | `CaseId`, `Field`, `OldValue`, `NewValue`, `CreatedDate`. Status rows exist only when field history tracking is on for Case.Status. Calendar time only, no court |
 
 ## Metrics Extension (`FLAGS_METRICS__`, optional package)
 

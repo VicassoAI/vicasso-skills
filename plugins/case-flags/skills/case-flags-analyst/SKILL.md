@@ -2,7 +2,7 @@
 name: case-flags-analyst
 license: Apache-2.0
 compatibility: Requires a connected Salesforce MCP server with read access to the Case Flags managed package (FLAGS__), and Python 3.9+ for the bundled scripts.
-description: Personal and managerial responsiveness analyst for the Vicasso Case Flags managed package, working over a connected Salesforce MCP. Use this whenever someone asks about their Case Flags work in plain language — "what's my day look like", "my flagged cases", "what should I work on", "am I overloaded / do I have a light day", "what's due today", "what's falling through the cracks" — or, for managers, "how is my team doing", "who's overloaded", "who needs help". Also use for Case Flags responsiveness questions - initial response time, ongoing responsiveness, interpreting Case Flags History Tracking, and going beyond the standard packaged reports. Trigger even when the person doesn't say "Case Flags" by name, as long as the org has Case Flags installed and the request is about flagged cases, follow-ups, response times, or triaging support work by urgency.
+description: Personal and managerial responsiveness analyst for the Vicasso Case Flags managed package, working over a connected Salesforce MCP. Use this whenever someone asks about their Case Flags work in plain language — "what's my day look like", "my flagged cases", "what should I work on", "am I overloaded / do I have a light day", "what's due today", "what's falling through the cracks" — or, for managers, "how is my team doing", "who's overloaded", "who needs help". Also use for Case Flags responsiveness questions - initial response time, ongoing responsiveness, interpreting Case Flags History Tracking, and going beyond the standard packaged reports. Also use for case age questions ("true case age", "why is this case so old", "how old is our backlog", "time in status", "how much of our resolution time is us vs the customer") — a breakdown of Salesforce's Age into our time vs the customer's. Trigger even when the person doesn't say "Case Flags" by name, as long as the org has Case Flags installed and the request is about flagged cases, follow-ups, response times, or triaging support work by urgency.
 ---
 
 # Case Flags Analyst
@@ -31,6 +31,7 @@ running any job queries** — do not work from memory of a job you haven't read 
 | "how long does it take to assign work vs respond", "time to assign vs time to respond", "does self-assigning skew our numbers", "split initial response into assignment time and response time" | F — Assignment/response decomposition | `references/job-f-assignment-response-split.md` |
 | "run the Case Flags reports", "the packaged metrics", "average time to respond by owner", "current red/black flags by owner", "recreate the Case Flags dashboard", or any of the six shipped reports by name | G — Packaged reports | `references/job-g-packaged-reports.md` |
 | "how has [account] experienced us", "account responsiveness", "how responsive is [account]", "responsiveness for [account] before the renewal", "which accounts are we slowest to", "which customers are least responsive to us", "how does [account] compare to normal / to our average" | H — Account responsiveness (two-sided) | `references/job-h-account-responsiveness.md` |
+| "true case age", "why is this case so old", "case age report", "how old is our backlog", "time in status", "how much of our resolution time is us vs the customer", "which old cases is nobody watching" | I — True Case Age (age broken down by court) | `references/job-i-true-case-age.md` |
 | "how much time do follow-ups cost me/us", "set up my time assumptions" — or automatically, once, the first time a follow-up-time-investment read is needed for someone who hasn't declared yet | Z — Setup: labor assumptions | `references/job-z-setup.md` |
 
 Shared plumbing: `references/field-reference.md` is canonical for **field meanings and data
@@ -48,6 +49,7 @@ section. **Read only the SOQL file(s) your job needs.**
 | §8 | `references/soql-followup-investment.md` | Jobs C, E — raw ordered pull for opening-trigger classification |
 | §9 | `references/soql-assignment-split.md` | Job F — case population, paginated CFHT pull, actor cross-check |
 | §10 | `references/soql-account.md` | Job H — two-sided account rollup, concentration, compare-to-normal |
+| §11 | `references/soql-case-age.md` | Job I — open backlog, closed-cohort population + aggregate, cohort CFHT pull, CaseHistory status fallback |
 
 Job files point into these rather than restating them.
 
@@ -65,6 +67,7 @@ the answer is a judgment rather than a calculation.
 | Contiguous flag-up runs → ongoing response, follow-up split, worst wait, customer turnaround | `scripts/run_stitch.py` |
 | Job F assignment vs response decomposition | `scripts/assignment_split.py` |
 | Any median / percentile / distribution, and `labor_per_clear` | `scripts/stats.py` |
+| Job I True Case Age buckets, cohort rollup, status × court, open-backlog aging | `scripts/age_decompose.py` |
 
 Write connector results to JSON, then pass the path (`--input`, or `--pages`/`--cfht`/`--cases`).
 Read `scripts/README.md` for the calling convention before first use. Two things worth knowing up
@@ -92,7 +95,10 @@ capabilities need the Case Flags History Tracking (CFHT) object — **single-cas
 **follow-up time-investment** add-on (Job C/E, `references/followup-time-investment.md`), and the full two-sided
 **account responsiveness** read (H). CFHT requires explicit object permissions and may not be reachable on a
 given connection; probe lazily (below) and degrade gracefully rather than failing. Job H degrades to a
-Case-field-only read (initial-response median + current flag-state snapshot) when CFHT is unavailable. Job Z
+Case-field-only read (initial-response median + current flag-state snapshot) when CFHT is unavailable. Job
+I (**True Case Age**) needs CFHT for the full breakdown by court, but its open-backlog lens runs on Case
+fields alone. Its closed-case read degrades to standard Age plus our-court and past-SLA BH, taken from
+the Case band rollups. Job Z
 (declaring labor assumptions) itself needs no CFHT — it's a plain read/write against
 `references/labor-assumptions.md` —
 but there's little reason to run it before CFHT is confirmed available, since its output only feeds a
@@ -183,6 +189,13 @@ Account outlier / concentration (job H — per side, our-court and customer-cour
     A worst case whose largest single interval clears this bar is a STALL (a dropped ball);
     one whose time is spread across many intervals with no single interval reaching it is a
     VOLUME/ITERATION outlier (complex, many-round case — fast per reply, not neglected).
+
+True Case Age (job I):
+  Backlog age buckets (calendar days since CreatedDate): 0–1, 1–3, 3–7, 7–30, 30+.
+    Passed to age_decompose.py as --edges 1,3,7,30.
+  Forgotten: open, NOT flagged (FLAGS__ViewedFlag__c null) AND no Follow-Up On date.
+  Post-resolution: the flag-down interval ending in the case's FINAL close (Action = 'Case Closed').
+  Working days: BH ÷ the hours in that calendar's business day (from BusinessHours). Never BH ÷ 24.
 ```
 
 ---

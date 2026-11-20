@@ -112,6 +112,31 @@ Mean sits beside median everywhere on purpose: the ratio is the tail signal Job 
 at 1.5×, and a clean median resting on one catastrophic case is the most misleading read
 available.
 
+### `age_decompose.py` — Job I True Case Age
+Assigns every CFHT interval to exactly one bucket: our court (with queue and past-SLA
+sub-totals), customer court, post-resolution (the flag-down interval ending in the
+**final** close), or closed gap (closed, then reopened). Modes:
+
+| Mode | Input | Returns |
+|---|---|---|
+| `case` | `--cfht`, optional `--cases` | per-case buckets beside Salesforce's Age |
+| `cohort` | `--cfht --cases [--group-by Priority]` | bucket shares, controllable-BH distribution, SLA exposure, handoffs, calendar-per-BH |
+| `status` | `--cfht --customer-statuses "With Customer"` | BH per status split by court; flag-up time in waiting-on-customer statuses |
+| `backlog` | `--cases` only (§11.1) | open cases by age bucket: flagged / follow-up set / forgotten |
+
+Enforced: BH, calendar hours and `End` must be present (silent-zero guard, exit `2`); a
+negative elapsed value fails the run (exit `3`). Warned, not fatal: CFHT starting after
+`Case.CreatedDate` (partial history), and our-court BH disagreeing with the Case's
+`Business_Hours_Age_1..4` rollup by more than 0.05 BH. The rollup comparison is an
+independent cross-check, not an identity. Running intervals on open cases are reported
+as calendar hours, never as zero BH. `--bh-per-day` adds a working-days column; the
+script never divides BH by 24.
+
+```bash
+python3 age_decompose.py --cfht <cache>/cohort.json --cases cases.json \
+    --mode cohort --group-by Priority --bh-per-day 10
+```
+
 ## Not scripted, deliberately
 
 Preflight interpretation, business-hours mode inference, Job D's lens selection and every

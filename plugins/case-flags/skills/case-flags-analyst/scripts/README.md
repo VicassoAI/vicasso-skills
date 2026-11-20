@@ -115,7 +115,11 @@ available.
 ### `age_decompose.py` — Job I True Case Age
 Assigns every CFHT interval to exactly one bucket: our court (with queue and past-SLA
 sub-totals), customer court, post-resolution (the flag-down interval ending in the
-**final** close), or closed gap (closed, then reopened). Modes:
+**final** close), closed gap (closed, then reopened), or after close (work done while
+the case stayed closed, which falls outside Salesforce's Age). It warns on after-close
+activity and on cases whose aging speed changed mid-life (their BH mixes calendars).
+Past SLA uses BH bands only; the calendar band fields apply thresholds in calendar
+hours and are not SLA time. Modes:
 
 | Mode | Input | Returns |
 |---|---|---|

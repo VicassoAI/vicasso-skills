@@ -7,8 +7,8 @@ Triggers: "true case age", "case age report", "why is this case so old", "how ol
 Salesforce's Age is one number: created → now (open) or created → closed. True Case Age keeps that
 number and **breaks it down by whose court the ball was in**, using Case Flags History Tracking (CFHT).
 "True" means *complete*, not "Salesforce is wrong". Always show the standard figure beside the
-breakdown, labelled "what Salesforce's Age shows", and never call it inaccurate. The calendar total
-reconciles to it.
+breakdown, labelled "what Salesforce's Age shows", and never call it inaccurate. The calendar total,
+minus any after-close time, reconciles to it.
 
 ## Why this beats the standard options (say this when someone asks "why not just use Age?")
 
@@ -43,6 +43,21 @@ and pass it to the script as `--bh-per-day`. Never divide BH by 24. Show calenda
 days and label it "calendar". When cases on different aging speeds use different calendars, say that
 working days aren't directly comparable across them (SKILL.md: never compare raw across aging speeds).
 
+**Aging speed is per interval, not per case.** Each CFHT record's BH follows the calendar of the aging
+speed in effect for that interval. Verified 2026-11-20: 22 of 22 intervals on two cases that moved from
+a 10-hour calendar to a 6-hour one matched their own interval's calendar. `Case.FLAGS__Aging_Speed__c`
+holds only the latest speed. So:
+- Segment by `FLAGS__Aging_Speed__c` on **CFHT** (§11.2 aggregate), not on Case.
+- For cases the script marks `mixed-speed`, don't convert BH to working days with a single divisor.
+  Show BH and say the case changed calendars partway through.
+
+**Holidays follow each calendar's own holiday list.** In the same check, 28 of 30 cases matched an
+independent recompute to within 0.01 BH across weekends, a short-Friday calendar and four holidays; the
+other 2 were the mixed-speed cases above. Two calendars skipped all four holidays. One 07:00–23:00
+calendar did **not** skip Juneteenth, because that holiday wasn't attached to it. Case Flags does what the
+calendar says. If BH looks high around a holiday, check the calendar's holiday list before doubting the
+data, and mention it as a possible configuration gap.
+
 ## The buckets
 
 Every CFHT interval lands in exactly one bucket. The script owns the walk: `scripts/age_decompose.py`.
@@ -51,10 +66,23 @@ Every CFHT interval lands in exactly one bucket. The script owns the walk: `scri
 |---|---|---|
 | **Our court** | The customer is waiting on us; this is the controllable part | `Flag_Set = true` |
 | ↳ of which **in a queue** | Waiting with no named owner | flag up and `Queue_Id__c` populated |
-| ↳ of which **past SLA** | Time in the L4 band | `Business_Hours_in_Age_4__c` on flag-up intervals |
+| ↳ of which **past SLA** | Time in the L4 band | `Business_Hours_in_Age_4__c` on flag-up intervals. **Never** the calendar-band `Hours_in_Age_4__c` / `Case.FLAGS__Hours_Age_4__c`: those apply the thresholds in calendar hours (one live case showed 80 h "past SLA" against 0 BH) |
 | **Customer court** | We are waiting on them | `Flag_Set = false`, not one of the next two |
 | **Post-resolution** | The final wait before the case closed | the flag-down interval that ends in the **final** `Action = 'Case Closed'` |
 | **Closed gap** | The case sat closed, then reopened | flag-down interval starting right after a **non-final** close |
+| **After close** | Work done while the case stayed closed | every interval **after** the final close; flag-up time inside it is reported separately |
+
+**After close is real and common.** The 2026-11-20 check of 30 live cases found 2 cases with history
+continuing past `ClosedDate` and no reopen:
+- A customer emailed an automation-closed case, the flag went up, the rep replied, and the case stayed
+  closed.
+- A case was parked in a status the org defines as closed ("Bug Fix Pending") while work continued for
+  a week.
+
+Salesforce's Age stops at `ClosedDate`, so this time is outside it. Keep it out of resolution time and
+out of the controllable median, and report it as its own line. It often signals a closed status used as
+a parking spot, or closed cases that customers still write in on. The Case band rollups include
+after-close flag-up time; the script accounts for that in its cross-check.
 
 `Action = 'Case Closed'` is the close test regardless of `Event` (see `references/field-reference.md`).
 The trailing post-resolution interval is kept separate because a long "resolved, waiting to close"

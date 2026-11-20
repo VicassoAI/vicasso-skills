@@ -57,7 +57,7 @@ different aging speeds as if equivalent.
 | `FLAGS__Initial_Response_Hours__c` | Hours from opened → initial response |
 | `FLAGS__Initial_Response_Business_Hours__c` | Business hours from opened → initial response. **Source for the initial-response median** |
 | `FLAGS__Case_Flag_Age__c` / `FLAGS__Case_Flag_Business_Age__c` | Hours / business-hours the current flag has been active |
-| `FLAGS__Hours_Age_1__c`…`4__c`, `FLAGS__Business_Hours_Age_1__c`…`4__c` | Rollups of time spent in each band (from CFHT). **Their sum = the case's total flag-up (our-court) time, and `_Age_4` = time past SLA.** Verified live 2026-11-20: 7 of 7 closed cases matched the CFHT flag-up `Business_Hours_Elapsed` sum to within 0.001 BH. They exclude the interval still running on an open case. This is what lets Job I give a no-CFHT read |
+| `FLAGS__Hours_Age_1__c`…`4__c`, `FLAGS__Business_Hours_Age_1__c`…`4__c` | Rollups of time spent in each band (from CFHT). **Their sum = the case's total flag-up (our-court) time, and `_Age_4` = time past SLA.** Verified live 2026-11-20: 37 of 37 closed cases matched the CFHT flag-up `Business_Hours_Elapsed` sum to within 0.001 BH. The sum includes flag-up time after a final close, and the calendar `Hours_Age_*` versions are not SLA time (see the CFHT notes below). They exclude the interval still running on an open case. This is what lets Job I give a no-CFHT read |
 | `FLAGS__Enable_Case_Flags__c` | In a selective-processing org, true = this case is managed by Case Flags |
 | `FLAGS__CaseFlagsBusinessHours__c` | Lookup → `FLAGS__CaseFlagsBusinessHours__c` wrapper |
 
@@ -189,12 +189,31 @@ records** from the set that opened it through the clear that closed it. Two meth
   asks for precision.
 Genuine clears exclude the `Flag Cleared` + `Case Closed` housekeeping rows.
 
-**Holidays are honored.** CFHT `FLAGS__Business_Hours_Elapsed__c` follows the aging speed's
-`BusinessHours` calendar, holidays included. Verified live 2026-11-20: an interval from Thu Jul 2 to Tue
-Jul 7, 2026 on a Mon–Fri 08:00–18:00 calendar counted 19.2 BH, which means the Jul 3 holiday was
-excluded (it would have been 29.2 BH otherwise). The **calendar total** of `FLAGS__Hours_Elapsed__c`
+**Holidays are honored, per calendar, per interval.** CFHT `FLAGS__Business_Hours_Elapsed__c` follows
+the `BusinessHours` calendar of the aging speed stamped on **that interval** (`FLAGS__Aging_Speed__c` on
+the CFHT record), including that calendar's own holiday list. Verified live on 2026-11-20 by
+recomputing independently on 30 closed cases (3 calendars, weekends, a short-Friday calendar, and
+Memorial Day, Juneteenth, Jul 3 and Labor Day):
+- **28 of 30 matched to within 0.01 BH.**
+- **The other 2 had changed aging speed mid-case.** All 22 of their intervals matched their own
+  interval's calendar.
+- **Holidays apply only where attached.** One calendar didn't skip Juneteenth because the holiday
+  wasn't attached to it.
+
+`Case.FLAGS__Aging_Speed__c` holds only the **latest** speed.
+
+**Calendar band fields are not SLA time.** `FLAGS__Hours_in_Age_1..4__c` (CFHT) and
+`FLAGS__Hours_Age_1..4__c` (Case) apply the band thresholds in calendar hours. On business-hours speeds
+they diverge sharply from the BH bands (one live case: 80 calendar hours in "L4" against 0 BH). Use the
+BH band fields for any SLA statement.
+
+**History can continue after `ClosedDate`.** A closed case that receives an email, or that sits in a
+status the org defines as closed, keeps writing CFHT records without a new close event. Two of the 30
+cases above did this. Salesforce's Age stops at `ClosedDate`; the Case BH rollups include the later
+flag-up time. The **calendar total** of `FLAGS__Hours_Elapsed__c`
 across a case's records reconciles to the standard Age span (created → closed) whenever CFHT starts at
-case creation.
+case creation and nothing happened after the close. Verified on 30 of 30 cases once after-close
+time is subtracted.
 
 ---
 

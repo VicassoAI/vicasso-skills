@@ -53,8 +53,9 @@ ORDER BY ClosedDate DESC
 `{N}` must stay inside the history window (`FLAGS__HistoryTrackingMonths__c` from Preflight), or the
 older cases will show partial history. The band rollups are what makes the **no-CFHT degraded read**
 possible (see the job file): the sum of `Business_Hours_Age_1..4` equals the case's total flag-up
-(our-court) BH, and `Business_Hours_Age_4` is the time past SLA. Verified live (2026-11-20): 7 of 7
-spot-checked closed cases matched the CFHT flag-up sum to within 0.001 BH.
+(our-court) BH, and `Business_Hours_Age_4` is the time past SLA. Verified live (2026-11-20): 37 of 37
+checked closed cases matched the CFHT flag-up sum to within 0.001 BH. Don't select the calendar
+`FLAGS__Hours_Age_*` fields for SLA; they use calendar-hour thresholds.
 
 **Aggregate first.** For "how much of our cohort's age is ours", one GROUP BY answers it without raw
 rows:
@@ -78,7 +79,7 @@ SELECT Id, FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Start__c, FLAGS__En
        FLAGS__Flag_Set__c, FLAGS__Event__c, FLAGS__Action__c, FLAGS__Owner_Name__c,
        FLAGS__Queue_Id__c, FLAGS__Case_Status__c, FLAGS__Flag_Level_BH__c,
        FLAGS__Business_Hours_Elapsed__c, FLAGS__Hours_Elapsed__c,
-       FLAGS__Business_Hours_in_Age_4__c, FLAGS__Hours_in_Age_4__c
+       FLAGS__Business_Hours_in_Age_4__c, FLAGS__Aging_Speed__c
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__c IN ({CASE_IDS})
 ORDER BY FLAGS__Case__c, FLAGS__Start__c ASC

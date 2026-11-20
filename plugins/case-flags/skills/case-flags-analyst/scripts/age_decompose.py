@@ -16,6 +16,16 @@ Buckets (every CFHT interval lands in exactly one top-level bucket):
                    (Action = 'Case Closed', Flag_Set = false): resolved, not yet closed
   closed_gap       flag-down intervals that START right after a non-final close and
                    run until the reopen -- the case sat closed, then came back
+  after_close      every interval AFTER the final close. Cases can keep working while
+                   still closed (a customer emails a closed case, or a "closed" status
+                   such as "Bug Fix Pending" is used as a parking spot). Salesforce's
+                   Age stops at ClosedDate; this time is outside it. Flag-up time here
+                   is reported separately as after_close_our_bh.
+
+Per-interval aging speed: each CFHT record's BH follows the calendar of the aging
+speed in effect for THAT interval (verified live). A case whose speed changed has BH
+from more than one calendar; the script flags it (mixed_speeds) because one BH is not
+the same amount of working time on a 6-hour calendar as on a 10-hour one.
 
 Modes
   case     per-case breakdown table (one row per case)
@@ -27,7 +37,9 @@ Modes
 Required CFHT SELECT: FLAGS__Case__c, FLAGS__Start__c, FLAGS__End__c, FLAGS__Flag_Set__c,
 FLAGS__Event__c, FLAGS__Action__c, FLAGS__Business_Hours_Elapsed__c, FLAGS__Hours_Elapsed__c.
 Recommended: FLAGS__Owner_Name__c, FLAGS__Queue_Id__c, FLAGS__Case_Status__c,
-FLAGS__Business_Hours_in_Age_4__c, FLAGS__Hours_in_Age_4__c.
+FLAGS__Business_Hours_in_Age_4__c, FLAGS__Aging_Speed__c.
+Do NOT use FLAGS__Hours_in_Age_4__c for SLA: it applies the band thresholds in
+CALENDAR hours (verified live: 80 h "past SLA" on a case with 0 BH past SLA).
 
 Usage
   python3 age_decompose.py --cfht cfht.json --cases cases.json --mode case
@@ -69,12 +81,12 @@ QUEUE = "FLAGS__Queue_Id__c"
 STATUS = "FLAGS__Case_Status__c"
 OWNER = "FLAGS__Owner_Name__c"
 BH_L4 = "FLAGS__Business_Hours_in_Age_4__c"
-HRS_L4 = "FLAGS__Hours_in_Age_4__c"
+SPEED = "FLAGS__Aging_Speed__c"
 
 CASE_CLOSED = "Case Closed"
 OWNER_CHANGED = "Case Owner Changed"
 
-BUCKETS = ["our_court", "customer_court", "post_resolution", "closed_gap"]
+BUCKETS = ["our_court", "customer_court", "post_resolution", "closed_gap", "after_close"]
 CASE_BH_ROLLUPS = [f"FLAGS__Business_Hours_Age_{n}__c" for n in range(1, 5)]
 
 # Reconciliation tolerances (hours). Rounding in CFHT elapsed fields is sub-second.
@@ -114,8 +126,10 @@ def decompose_case(case_id: str, records: list[dict]) -> dict:
     bh = {b: 0.0 for b in BUCKETS}
     cal = {b: 0.0 for b in BUCKETS}
     queue_bh = queue_cal = 0.0
-    past_sla_bh = past_sla_cal = 0.0
+    past_sla_bh = 0.0
+    after_close_our_bh = 0.0
     open_tail_cal = 0.0
+    speeds: list[str] = []
     owners: list[str] = []
     handoffs = 0
 
@@ -132,13 +146,20 @@ def decompose_case(case_id: str, records: list[dict]) -> dict:
         if rec_bh < 0 or rec_cal < 0:
             raise ValueError(f"negative elapsed on case {case_id} record {i}")
 
-        if truthy(get(rec, FLAG_SET)):
+        speed = get(rec, SPEED)
+        if speed and speed not in speeds:
+            speeds.append(speed)
+
+        if final_close is not None and i > final_close:
+            bucket = "after_close"
+            if truthy(get(rec, FLAG_SET)):
+                after_close_our_bh += rec_bh
+        elif truthy(get(rec, FLAG_SET)):
             bucket = "our_court"
             if get(rec, QUEUE):
                 queue_bh += rec_bh
                 queue_cal += rec_cal
             past_sla_bh += to_float(get(rec, BH_L4)) or 0.0
-            past_sla_cal += to_float(get(rec, HRS_L4)) or 0.0
         elif i == final_close:
             bucket = "post_resolution"
         elif i in after_close:
@@ -167,7 +188,9 @@ def decompose_case(case_id: str, records: list[dict]) -> dict:
         "queue_bh": queue_bh,
         "queue_cal": queue_cal,
         "past_sla_bh": past_sla_bh,
-        "past_sla_cal": past_sla_cal,
+        "after_close_our_bh": after_close_our_bh,
+        "speeds": speeds,
+        "mixed_speeds": len(speeds) > 1,
         "open_tail_cal": open_tail_cal,
         "closes": len(close_idx),
         "handoffs": handoffs,
@@ -218,7 +241,9 @@ def attach_cases(rows: list[dict], cases: list[dict], warnings: list[str]) -> No
         rollups = [to_float(get(case, f)) for f in CASE_BH_ROLLUPS]
         if all(v is not None for v in rollups):
             row["rollup_our_bh"] = sum(rollups)
-            if abs(row["rollup_our_bh"] - row["bh"]["our_court"]) > ROLLUP_TOLERANCE_BH:
+            # Rollups include flag-up time after the final close too.
+            ours = row["bh"]["our_court"] + row["after_close_our_bh"]
+            if abs(row["rollup_our_bh"] - ours) > ROLLUP_TOLERANCE_BH:
                 rollup_mismatch += 1
     if partial:
         warnings.append(
@@ -236,6 +261,28 @@ def attach_cases(rows: list[dict], cases: list[dict], warnings: list[str]) -> No
 
 
 # ---------------------------------------------------------------------------- modes
+
+
+def structural_warnings(rows: list[dict]) -> list[str]:
+    """Shapes verified live that change how the numbers must be read."""
+    out = []
+    after = [r for r in rows if r["cal"]["after_close"] > CALENDAR_TOLERANCE_H]
+    if after:
+        out.append(
+            f"{len(after)} case(s) have activity AFTER their final close (worked while still "
+            "closed, or parked in a closed status). Salesforce's Age stops at ClosedDate, so "
+            "the calendar total exceeds it by the after_close time. Report after-close work "
+            "separately; it is not part of resolution time."
+        )
+    mixed = [r for r in rows if r["mixed_speeds"]]
+    if mixed:
+        out.append(
+            f"{len(mixed)} case(s) changed aging speed mid-life ({', '.join(sorted({' -> '.join(r['speeds']) for r in mixed}))}). "
+            "Each interval's BH uses that interval's calendar, so their BH mixes calendars: "
+            "don't convert to working days with one --bh-per-day, and segment by "
+            "interval speed (CFHT FLAGS__Aging_Speed__c), not Case.FLAGS__Aging_Speed__c."
+        )
+    return out
 
 
 def mode_case(rows: list[dict]) -> dict:
@@ -268,6 +315,8 @@ def mode_cohort(rows: list[dict], group_by: str | None) -> dict:
             "handoffs_median": describe([m["handoffs"] for m in members])["median"],
             "cases_with_owner_return": sum(1 for m in members if m["owner_returns"]),
             "reopened": sum(1 for m in members if m["closes"] > 1),
+            "worked_after_close": sum(1 for m in members if m["cal"]["after_close"] > CALENDAR_TOLERANCE_H),
+            "mixed_speeds": sum(1 for m in members if m["mixed_speeds"]),
             "calendar_per_bh": describe(ratio),
         }
     return {"mode": "cohort", "group_by": group_by, "groups": out}
@@ -347,11 +396,14 @@ def render_factory(bh_per_day: float | None):
                     _days(r["bh_total"], bh_per_day),
                     fnum(r["bh"]["our_court"]), fnum(r["queue_bh"]), fnum(r["past_sla_bh"]),
                     fnum(r["bh"]["customer_court"]), fnum(r["bh"]["post_resolution"]),
-                    fnum(r["bh"]["closed_gap"]), fnum(r["open_tail_cal"]), r["handoffs"],
-                    "partial" if r.get("history_gap_h") else "",
+                    fnum(r["bh"]["closed_gap"]), fnum(r["bh"]["after_close"]),
+                    fnum(r["open_tail_cal"]), r["handoffs"],
+                    ("partial " if r.get("history_gap_h") else "")
+                    + ("mixed-speed" if r["mixed_speeds"] else ""),
                 ])
             print(table(rows, ["Case", "Std Age h", "Cal h", "Total BH", "Our BH", "  queue",
-                               "  past SLA", "Cust BH", "Post-res", "Closed gap", "Running cal h",
+                               "  past SLA", "Cust BH", "Post-res", "Closed gap", "After close",
+                               "Running cal h",
                                "Handoffs",
                                "History"]))
             if len(payload["cases"]) > 40:
@@ -370,6 +422,7 @@ def render_factory(bh_per_day: float | None):
                 print(f"past SLA: {g['cases_past_sla']} case(s), {fnum(g['past_sla_bh_total'])} BH | "
                       f"queue: {fnum(g['queue_bh_total'])} BH | owner returns: "
                       f"{g['cases_with_owner_return']} | reopened: {g['reopened']} | "
+                      f"worked after close: {g['worked_after_close']} | mixed speeds: {g['mixed_speeds']} | "
                       f"calendar h per BH: {fnum(g['calendar_per_bh']['median'])}")
         elif mode == "status":
             rows = [[s, fnum(v["our_court"]), fnum(v["customer_court"])]
@@ -442,6 +495,7 @@ def main() -> int:
                 warn = check_variance([r["bh_total"] for r in rows], "total BH per case")
                 if warn:
                     warnings.append(warn)
+                warnings.extend(structural_warnings(rows))
                 if args.cases:
                     attach_cases(rows, load_records(args.cases), warnings)
                 payload = mode_case(rows) if args.mode == "case" else mode_cohort(rows, args.group_by)

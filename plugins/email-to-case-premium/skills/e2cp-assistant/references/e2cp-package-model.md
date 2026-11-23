@@ -67,7 +67,7 @@ The invocable action `E2CP.InvocableSend.send`, called through the Salesforce MC
 
 - **Public:** the New Comment Page's pre-selected defaults — the Case Contact (or Lead) and the Additional To / CC / BCC addresses when `EMAIL_NOTIFICATION` is on, plus Case Team Members when team members are enabled. With `EMAIL_NOTIFICATION` off it emails nobody and only adds the comment.
 - **Private:** only the private Additional To / CC / BCC addresses whose domain is in Internal Domains (`PRIVATE_COMMENT_DOMAINS`). Others are dropped silently. With Internal Domains empty, a private reply emails nobody.
-- Exclude List, routing, and org-wide addresses are always removed.
+- Exclude List, routing, org-wide, and Inbound Email Addresses (`E2C_EMAIL_CASE_ORIGIN_ROUTING`) entries are always removed, so E2CP never emails itself.
 
 ### Order with Case automation
 
@@ -77,8 +77,8 @@ The New Comment Page inserts the comment, updates the Case, then sends ([order o
 
 - A case can hold several drafts from different users. Agents can open a colleague's draft on the New Comment Page or Timeline, and editing it updates the original in place.
 - The User field holds the user who created the draft; a draft with no User shows its creator as the author.
-- **Recipients:** To / CC / BCC hold semicolon-separated entries, each one `case_contact`, `case_lead`, a CaseTeamMember Id (`0B6…`), or a plain email address. Some versions leave Case Team Members out of drafts created through Send Response.
-- **Default files:** a draft created with a `cannedResponseId` keeps the response's files and preselects them when opened, except files already attached to the case, which load unselected. Inserting the response on the New Comment Page behaves the same way.
+- **Recipients:** To / CC / BCC hold semicolon-separated entries, each one `case_contact`, `case_lead`, a CaseTeamMember Id (`0B6…`), or a plain email address.
+- **Files:** a draft created through Send Response keeps its files (a Canned Response's default files, or `fileAttachments`) and preselects them when opened, except files already attached to the case, which load unselected. Inserting a response on the New Comment Page behaves the same way.
 - Create drafts through Send Response (`createDraft = true`), never by inserting `E2CP__Case_Comment_Draft__c` directly. Query for the new draft right after the call (this case, this user as User, created since the call).
 - `E2CP__Fields_Updated_1__c` holds the Case field changes saved with a draft, as JSON. They load on the New Comment Page with the draft:
 
@@ -86,7 +86,7 @@ The New Comment Page inserts the comment, updates the Case, then sends ([order o
   {"case":{"Subject":{"oldValue":"Printer jam","newValue":"Printer jam - resolved"},"Status":{"oldValue":"New","newValue":"Working"}}}
   ```
 
-  `E2CP__Fields_Updated_2__c` is used only for overflow past 131,072 characters.
+  `E2CP__Fields_Updated_2__c` is used only for overflow past 131,072 characters. A change loads only when the field is in the New Comment Page field set, the user can edit it, the key matches the field's API name exactly (including case), and `oldValue` equals the Case's current value. `OwnerId` needs an object with `value`, `label` and `icon` rather than an Id.
 
 ## Files
 

@@ -56,7 +56,7 @@ When a converted item and a mined pattern cover the same need, keep the wording 
 
 A response can carry default files that go out every time it's used: Files linked to the response record. There is no attachment field.
 
-- **Existing files:** after creating the response, link each file to it with a `ContentDocumentLink` (the response's Id as `LinkedEntityId`). The manager confirms each file first. Linking needs edit access to the response and access to the file.
+- **Existing files:** after creating the response, link each file to it with a `ContentDocumentLink`: the response's Id as `LinkedEntityId`, `ShareType = V`, and `Visibility = AllUsers`. Use `Visibility = InternalUsers` only for a response meant for private (internal) replies, and only in orgs with Experience Cloud sites enabled; without sites that value doesn't exist. The manager confirms each file first. Linking needs edit access to the response and access to the file.
 - **New files:** the skill doesn't upload them. Ask the manager to add the file in the response's Files related list.
 - **Embedded images are attached too.** Every image embedded in the body is also linked to the response, so the customer gets it inline and as an attachment. When a new response embeds images, tell the manager.
 - Only link files meant for every customer who gets this response. A file for one customer belongs on that case, not on the response.
@@ -67,7 +67,7 @@ A response can carry default files that go out every time it's used: Files linke
 
 1. **Most-used responses first** — a handful typically carries most of the volume. Fix errors there first: merge fields that don't resolve, broken links, wrong names or facts, and default files that don't match the text (the body says "attached" but no file is linked, or a linked file the body never mentions). Offer wording or tone improvements to heavily used responses only as suggestions, and say that agents know them as they are.
 2. **Then the rest of the library:**
-   - **Invisible to agents** — responses with no category (they never show on the Lightning New Comment Page), and responses only in categories whose criteria no case can match. For an uncategorized response, propose a category for it.
+   - **Invisible to agents** — responses with no category (they never show on the Lightning New Comment Page), and responses only in categories whose criteria no case can match. For an uncategorized response, propose a category for it. When many responses have no category, tell the manager that E2CP setup can assign one category to all of them at once.
    - **Dormant** — no use in months, by Last Used Date.
    - **True near-duplicates** — bodies that say the same thing. Intentional variants, such as one per product or audience, aren't duplicates; don't call them out.
 3. **Rare, low priority:** content or default files tied to a version, date, or retired name (e.g. "error in version 9.43").

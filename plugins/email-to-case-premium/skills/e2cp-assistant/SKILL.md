@@ -1,7 +1,7 @@
 ---
 name: e2cp-assistant
 license: Apache-2.0
-compatibility: Requires a connected Salesforce MCP server with access to the Email to Case Premium managed package (E2CP__) and its E2CP Send Response invocable action, Email to Case Premium 10.24 or later, and the Standard layout (Case Comments on the Timeline).
+compatibility: Requires a connected Salesforce MCP server with access to the Email to Case Premium managed package (E2CP__) and its E2CP Send Response invocable action, Email to Case Premium 10.25 or later, and the Standard layout (Case Comments on the Timeline).
 description: Case companion for support agents and managers who work cases with Vicasso Email to Case Premium (E2CP) in Salesforce, over a connected Salesforce MCP. Use this whenever someone working a case asks "catch me up", "what's going on with this case", "where does this stand", "help me reply", "draft a response", or "what am I missing", or wants a Timeline update that summarizes this case, its child cases, related records, or another connected system. Also use it to enrich auto-created contacts, call out people who can no longer be reached, match a case to a Widespread Issue or report a new one, and for managers who ask "what are we retyping?", "set up our Canned Response library", or "review our Canned Responses". Trigger even when the person doesn't say Email to Case Premium by name, as long as the org has E2CP installed and the request is about reading, replying to, or updating a support case.
 ---
 
@@ -33,7 +33,7 @@ Reference files, read when the job needs them:
 
 1. **Settings.** Read the E2CP settings the job needs from `E2CP__casepref__c`. If the query is refused (orgs that restrict access to custom settings need it granted), infer each setting from data, show the user what was inferred, confirm once, save the confirmed values in Claude's memory for this org, and tell the user which access their admin can grant. See `references/settings.md`.
 2. **Layout.** If the org uses the Inbound Specific layout (`ENABLE_CASE_FEED_EXTENSION = true`), there are no Case Comments to work from. Say the skill supports the Standard layout only, and stop.
-3. **Version.** The rules here describe Email to Case Premium 10.24 or later. The Salesforce MCP usually can't read installed package versions, so unless Claude's memory already has it for this org, ask the user once (Setup → Installed Packages shows it) and save the answer. If the org runs an older version, tell the user that some steps (sending, drafts, field updates) may not behave as described, and recommend upgrading.
+3. **Version.** The rules here describe Email to Case Premium 10.25 or later. The skill doesn't check the installed version, which can't be read from outside the package. If Send Response rejects a parameter or behaves differently than described here, tell the user their org may be below 10.25 and recommend upgrading.
 4. **Send Response.** Before offering to send, save a draft, or add a Timeline update, check that the E2CP Send Response action is among this session's tools. A connection that can read and edit records can't always run invocable actions. If it's missing, say so up front, and tell the user how to fix it: ask their Salesforce admin to add the E2CP Send Response Apex action (`E2CP.InvocableSend.send`) to the Salesforce MCP server they connect through. Until then, the skill can still catch the agent up and write the reply, and offers the final text in chat for the agent to paste into the New Comment Page. Never work around it by inserting a draft or comment record directly.
 5. **Org-specific values** (automation user names, custom field names, field sets, library sizes) are discovered at run time. Never assume them.
 
@@ -209,7 +209,7 @@ These apply only when the other product is installed.
 - **Classify comments by IsPublished and CreatedBy, not by header.** Headers depend on org settings and are absent when recipients aren't shown in comments.
 - **CommentBody is truncated.** Read `CommentBodyRichText`.
 - **Send Response has no recipient parameter.** To add someone, update the Case's Additional To / CC / BCC fields (or add a Case Team Member) first.
-- **The org's support addresses are never recipients or contacts.** They appear on every inbound email; adding one sends E2CP a copy of its own reply. See `references/replying.md`.
+- **The org's support addresses are never recipients or contacts.** They appear on every inbound email, and Send Response drops them anyway. See `references/replying.md`.
 - **A sent reply can email no one.** With no default recipients (or `EMAIL_NOTIFICATION` off), Send Response only adds a comment. Check before sending.
 - **Send Response doesn't check Comment Only Mode.** The skill must.
 - **body and cannedResponseId are mutually exclusive.** Passing both throws an error.

@@ -17,7 +17,7 @@ When the org has **Restrict access to custom settings** enabled, a user can quer
 1. Infer each setting the job needs, using the signals below.
 2. Show the user what was inferred and why, and confirm once.
 3. Save the confirmed values in Claude's memory for this org, and use them from then on.
-4. Tell the user once how to remove the guesswork: their Salesforce admin can grant read access to the E2CP custom settings above (Custom Setting Definitions access in a permission set). That is narrower than View All Custom Settings or Customize Application, which reach every setting in the org. Never suggest turning off Restrict access to custom settings.
+4. Tell the user once how to remove the guesswork: their Salesforce admin can grant read access to the E2CP custom settings above (Custom Setting Definitions access in a permission set). That is narrower than View All Custom Settings or Customize Application, which reach every setting in the org. This access only lets users read E2CP's settings, not change them, and E2CP keeps its sensitive configuration in a protected custom setting it doesn't reach. Never suggest turning off Restrict access to custom settings.
 
 Field sets (including the New Comment Page field set) can't be read through the Salesforce MCP at all; infer them the same way.
 
@@ -34,6 +34,7 @@ Field sets (including the New Comment Page field set) can't be read through the 
 | `USE_SIGNATURE` | Salesforce appends the agent's signature. On: don't write a signature block | Ask the user |
 | `PRIVATE_COMMENT_DOMAINS` (list) | Internal Domains: the only domains private replies are emailed to | No data signal. Before the first private reply that should email someone, ask the user for the list (an empty answer is valid) and save it. Don't assume it's empty |
 | `IGNORE_INTERNAL_SUBDOMAINS` | Lets subdomains of Internal Domains match | Ask the user |
+| `E2C_EMAIL_CASE_ORIGIN_ROUTING` | Inbound Email Addresses: the support addresses customers write to. Never recipients or contacts | Org-wide email addresses and active Email Services addresses cover most of them; no other data signal |
 | `PKB_BASE_URL` | Base URL for `{$KnowledgeLinks}` (or the case's `Knowledge_Base_URL__c`). Neither: links start with the text "null" | Ask the user |
 | `PKB_ALL_LINKS` | Includes internal-only articles in `{$KnowledgeLinks}` | Ask the user |
 | `NEW_COMMENT_FIELDS` | The field set shown on the New Comment Page | See below |

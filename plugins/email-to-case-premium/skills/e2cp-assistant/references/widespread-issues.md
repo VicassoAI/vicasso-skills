@@ -4,7 +4,7 @@ Only when Widespread Issues is enabled (`WSI_ENABLED`, off by default). When it 
 
 ## Who Does What
 
-- **Agents** report new Widespread Issues and attach cases to active ones.
+- **Agents** report new Widespread Issues and attach cases to them.
 - **Managers** manage Widespread Issues and broadcast updates. Broadcasting is not part of this skill.
 - A new Widespread Issue is owned by the org's configured Widespread Issue Owner (a manager or a queue of managers).
 
@@ -16,7 +16,7 @@ While reviewing a case, compare it against:
 - **Recently resolved** ones: closed (a status in the org's `wsi_closed_status` list) but not yet archived. A closed Widespread Issue is archived `WSI_ARCHIVE_AFTER` days (default 7) after its Closed Date.
 - **Archived** ones only when "Enable Search for Archived Widespread Issues" (`WSI_ENABLE_ARCHIVE_SEARCH`) is on.
 
-When a case matches, offer to attach it. When replying, draw on the Widespread Issue's Description and its latest public owner comment.
+When a case matches an active Widespread Issue, offer to attach it. When it matches a closed or archived one, say so, name its status, and ask the agent whether to attach the case. When replying, draw on the Widespread Issue's Description and its latest public owner comment.
 
 ## Spotting an Unreported Issue
 

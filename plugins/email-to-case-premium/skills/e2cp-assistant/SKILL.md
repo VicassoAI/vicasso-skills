@@ -140,7 +140,7 @@ The core job. Two requests share one read of the case.
 4. **Show one or two options** (three at most, counting Canned Responses and fresh replies together), each with merge fields resolved against the case, what it's missing for this case, the proposed Case field updates, public or private, and the recipients. Then wait for the agent to choose.
 5. **Send or save as a draft** — the agent chooses. Run the recipient check, the draft check, and the audience gate first.
 
-Fresh replies follow the team's house voice, learned from recent public comments. Compose as rich text (HTML) and pass the HTML as-is; never strip formatting, including from Canned Response and Knowledge content. Keep replies as short as the situation allows. Don't add a second sign-off, and when the org adds the agent's Salesforce signature to emails (`USE_SIGNATURE`), don't write a signature block.
+Fresh replies follow the team's house voice, learned from recent public comments. Compose as rich text (HTML) and pass the HTML as-is; never strip formatting, including from Canned Response and Knowledge content. When rich text is off (`ENABLE_HTML_SUPPORT`), compose plain text with line breaks and no markup instead. Keep replies as short as the situation allows. Don't add a second sign-off, and when the org adds the agent's Salesforce signature to emails (`USE_SIGNATURE`), don't write a signature block.
 
 Every detail of steps 3–5 — Canned Response visibility and ranking, usage counting, recipients, Comment Only Mode, Knowledge links, field updates, the send order, and drafts — is in `references/replying.md`. Read it before the first reply.
 

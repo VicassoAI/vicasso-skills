@@ -92,7 +92,7 @@ The New Comment Page inserts the comment, updates the Case, then sends ([order o
 
 - Inbound email files are Files (ContentDocument) linked to both the EmailMessage and the Case.
 - For **inline images only**, E2CP's automation user creates a Content Delivery and writes its download URL (`/sfc/dist/version/download/…`) into the comment HTML. The image downloads from that URL with no login.
-- These links exist only when inline images are on (`DISABLE_INLINE_IMAGE_SUPPORT = false`; the setting is inverted and defaults to off). Otherwise the image reference is replaced by the file name.
+- These links exist only when inline images are on (`DISABLE_INLINE_IMAGE_SUPPORT = false`). The setting is inverted and defaults to `true`, so inline images are off unless an admin turns them on. When they are off, the image reference is replaced by the file name.
 - Links expire after `CONTENT_DELIVERY_EXPIRATION` days (default 30; 0 or less means never) and are never renewed. Expired links are common on older cases.
 - Attachments (PDFs, logs, `.eml`) never get a delivery link.
 - The Salesforce MCP can't return file bytes: `VersionData` comes back as a REST path. Ask the agent to attach anything without a live delivery link.

@@ -43,7 +43,7 @@ An unresolved merge field renders literally in the customer's email. Leave unres
 
 The New Comment Page counts a use when a response is **inserted** (Usage Count +1, Last Used By, Last Used Date; nothing else), not when it's sent. Loading a draft doesn't count again. Match that:
 
-- **One trigger.** A use counts when the agent picks an option built on a Canned Response. Options Claude only shows don't count.
+- **One trigger.** A use counts when the skill sends or saves a draft built on a Canned Response. Options Claude only shows don't count, and neither does text handed over in chat for the agent to paste.
 - **Once per response per reply.** A reply combining two responses counts each once.
 - **Unedited:** send or draft through Send Response with its `cannedResponseId`, which logs the use.
 - **Edited or combined:** Send Response can't take both `body` and `cannedResponseId`, so send or save the text, then update the three usage fields on each response used. If the agent can't edit those fields, skip it and say so in one line.
@@ -92,7 +92,7 @@ Run these checks every time, in this order.
    - Adding someone: Send Response has no recipient parameter. With the agent's confirmation, update the Case's Additional To / CC / BCC fields (or add a Case Team Member) first, then send.
    - Private: only the private Additional To / CC / BCC addresses whose domain is in Internal Domains (`PRIVATE_COMMENT_DOMAINS`) are emailed; E2CP silently drops the rest. Check that Internal Domains is populated and that each intended recipient's domain is on it. When settings can't be read and the list isn't in memory yet, ask the user for it (see `settings.md`); don't assume it's empty. When the list is empty, nobody gets the email: tell the agent before posting. To add an internal person, use the private Additional fields.
 4. **Audience gate** (SKILL.md, "Audience"). Scan the final HTML. Stop on any internal link or record Id.
-5. **Final confirmation.** Show the final text, public or private, the recipients, the files that will be attached, and the field updates. Wait for the agent.
+5. **Final confirmation.** Show the final text, public or private, the recipients, the files that will be attached, and the field updates. Also list every other write that comes with it: changes to the Case's Additional To / CC / BCC fields or Case Team, the Knowledge article to attach to the case, and the usage update on each edited or combined Canned Response. Wait for the agent.
 
 ## Sending
 

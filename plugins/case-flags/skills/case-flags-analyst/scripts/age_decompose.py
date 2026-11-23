@@ -60,8 +60,13 @@ from datetime import datetime, timezone
 
 from cfa_common import (
     DataError,
+    CUSTOMER_SET_ACTIONS,
+    MANUAL_CLEAR_ACTION,
+    ORG_AUTOMATION_ACTION,
+    REPLY_CLEAR_ACTIONS,
     cfht_sort_key,
     check_variance,
+    is_genuine_clear,
     describe,
     emit,
     fnum,
@@ -90,6 +95,13 @@ SPEED = "FLAGS__Aging_Speed__c"
 CASE_CLOSED = "Case Closed"
 OWNER_CHANGED = "Case Owner Changed"
 STATUS_CHANGED = "Case Status Changed"
+OWNER_ACTIVE = "FLAGS__Owner_Is_Active__c"
+OFFSETS = ("FLAGS__CaseTimeOffset2__c", "FLAGS__CaseTimeOffset3__c", "FLAGS__CaseTimeOffset4__c")
+# A clear this soon after creation is a rep logging the case, not a response to a customer.
+REP_LOGGED_SECONDS = 60
+# A resolved status reverted within this many seconds of a reply counts as "reverted on reply".
+REVERT_WINDOW_SECONDS = 60
+CLOSE_DATE_MATCH_SECONDS = 5
 
 BUCKETS = ["our_court", "customer_court", "post_resolution", "closed_gap", "after_close"]
 CASE_BH_ROLLUPS = [f"FLAGS__Business_Hours_Age_{n}__c" for n in range(1, 5)]
@@ -142,9 +154,46 @@ def infer_closed(case_id: str, records: list[dict]) -> bool:
     )
 
 
+def find_closes(records: list[dict], is_closed: bool, closed_date,
+                closed_statuses: frozenset) -> tuple[list[int], bool]:
+    """
+    Indexes of the records that END at a close, and whether a fallback was needed.
+
+    Primary: Action = 'Case Closed', which Case Flags logs when its "Clear flag on case
+    close" setting is on. An org with that setting off may log no such Action, so fall
+    back to (a) the transition into a closed status, when the person names their closed
+    statuses (--closed-statuses), and (b) for a case closed now, the record whose End
+    matches Case.ClosedDate.
+    """
+    idx = [i for i, r in enumerate(records) if get(r, ACTION) == CASE_CLOSED]
+    if idx:
+        return idx, False
+    found = set()
+    if closed_statuses:
+        for i in range(len(records) - 1):
+            if (get(records[i], STATUS) not in closed_statuses
+                    and get(records[i + 1], STATUS) in closed_statuses):
+                found.add(i)
+    if is_closed and closed_date is not None:
+        for i, r in enumerate(records):
+            end = parse_dt(get(r, END))
+            if end and abs((end - closed_date).total_seconds()) <= CLOSE_DATE_MATCH_SECONDS:
+                found.add(i)
+    return sorted(found), bool(found)
+
+
+def level_for(bh: float, offsets) -> int | None:
+    """Flag level a wait of this many BH reached, from the case's own thresholds."""
+    if not offsets or any(o is None for o in offsets):
+        return None
+    return 1 + sum(1 for o in offsets if bh >= o)
+
+
 def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = None,
                    flagged_now: bool | None = None,
-                   resolved_statuses: frozenset = frozenset()) -> dict:
+                   resolved_statuses: frozenset = frozenset(),
+                   closed_date=None, closed_statuses: frozenset = frozenset(),
+                   offsets=None) -> dict:
     """
     Walk one case's intervals in Start order and assign each to a bucket.
 
@@ -160,7 +209,8 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
     if is_closed is None:
         is_closed = infer_closed(case_id, records)
 
-    close_idx = [i for i, r in enumerate(records) if get(r, ACTION) == CASE_CLOSED]
+    close_idx, close_fallback = find_closes(records, is_closed, closed_date, closed_statuses)
+    close_set = set(close_idx)
     final_close = close_idx[-1] if (close_idx and is_closed) else None
     non_final = {i for i in close_idx if i != final_close}
     in_gap = False
@@ -184,6 +234,7 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
     our_waits: list[dict] = []
     cust_waits: list[dict] = []
     seg: str | None = None
+    contacts: list[dict] = []
 
     for i, rec in enumerate(records):
         rec_bh = to_float(get(rec, BH))
@@ -227,7 +278,7 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
         was_gap = in_gap
         if truthy(get(rec, FLAG_SET)):
             in_gap = False
-        elif was_gap and get(rec, EVENT) == STATUS_CHANGED and get(rec, ACTION) != CASE_CLOSED:
+        elif was_gap and get(rec, EVENT) == STATUS_CHANGED and i not in close_set:
             in_gap = False
         if i in non_final:
             in_gap = True
@@ -236,11 +287,10 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
 
         if bucket == "our_court":
             if seg != "our":
-                our_waits.append({"bh": 0.0, "reply": False})
+                our_waits.append({"bh": 0.0, "cleared_by": None, "start_i": i})
                 seg = "our"
             our_waits[-1]["bh"] += rec_bh
-            our_waits[-1]["reply"] = (get(rec, EVENT) == "Flag Cleared"
-                                      and get(rec, ACTION) != CASE_CLOSED)
+            our_waits[-1]["cleared_by"] = get(rec, ACTION) if is_genuine_clear(rec) else None
         elif bucket == "customer_court":
             if seg != "cust":
                 cust_waits.append({"bh": 0.0, "cal": 0.0, "ended_by": None})
@@ -266,8 +316,14 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
                 seg = None
         else:
             seg = None
-        if get(rec, ACTION) == CASE_CLOSED:
+        if i in close_set:
             seg = None
+        if get(rec, EVENT) == "Flag Set" and get(rec, ACTION) in CUSTOMER_SET_ACTIONS:
+            # The customer raised the flag. Where was the case when they did?
+            state = ("closed" if bucket in ("closed_gap", "after_close")
+                     else "resolved" if get(rec, STATUS) in resolved_statuses else "open")
+            contacts.append({"i": i, "state": state, "at": get(rec, END)})
+
 
         if get(rec, EVENT) == OWNER_CHANGED:
             handoffs += 1
@@ -281,6 +337,60 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
 
     returns = sum(1 for k, o in enumerate(owners) if o in owners[:k])
     first = records[0] if records else {}
+
+    # Rep-logged: the flag was cleared within a minute of creation (any genuine clear).
+    # The packaged Initial Response for such a case measures nothing about a customer.
+    rep_logged = False
+    if records and parse_dt(get(records[0], START)):
+        t0 = parse_dt(get(records[0], START))
+        for r in records:
+            end = parse_dt(get(r, END))
+            if end is None or (end - t0).total_seconds() > REP_LOGGED_SECONDS:
+                break
+            if is_genuine_clear(r):
+                rep_logged = True
+                break
+
+    # Contacts while resolved/closed, with the reply wait that followed each.
+    for c in contacts:
+        # The flag-up stretch the contact started, wherever it falls (inside Age or after
+        # the final close). Only a genuine clear ends it as a reply; a housekeeping clear
+        # (e.g. Automatically Cleared) means nobody replied.
+        j, wait_bh, replied = c["i"] + 1, 0.0, False
+        while j < len(records) and truthy(get(records[j], FLAG_SET)):
+            wait_bh += to_float(get(records[j], BH)) or 0.0
+            if is_genuine_clear(records[j]):
+                replied = True
+                break
+            if get(records[j], EVENT) == "Flag Cleared":
+                break
+            j += 1
+        c["reply_wait_bh"] = wait_bh if replied else None
+        c["level_reached"] = level_for(wait_bh, offsets) if j > c["i"] + 1 or replied else None
+
+    # Resolved status reverted as a reply went out, with no customer contact in between.
+    # Case Flags itself never changes Status: this is the org's automation or reply tool.
+    reverted = 0
+    if resolved_statuses:
+        contact_idx = {c["i"] for c in contacts}
+        start = None
+        for i in range(len(records) - 1):
+            st, nx = get(records[i], STATUS), get(records[i + 1], STATUS)
+            if st in resolved_statuses and start is None:
+                start = i
+            if st in resolved_statuses and nx not in resolved_statuses and i not in close_set:
+                t = parse_dt(get(records[i], END))
+                near = [records[j] for j in (i - 1, i, i + 1) if 0 <= j < len(records)]
+                replied = any(is_genuine_clear(r) and parse_dt(get(r, END)) and t and
+                              abs((parse_dt(get(r, END)) - t).total_seconds()) <= REVERT_WINDOW_SECONDS
+                              for r in near)
+                customer = any(k in contact_idx for k in range(start, i + 1))
+                if replied and not customer:
+                    reverted += 1
+                start = None
+
+    inactive = sorted({get(r, OWNER) for r in records
+                       if OWNER_ACTIVE in r and get(r, OWNER_ACTIVE) is False and get(r, OWNER)})
 
     def wait_summary(waits: list[dict]) -> dict:
         values = [w["bh"] for w in waits]
@@ -306,11 +416,35 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
             "unknown" if flagged_now is None else ("our_court" if flagged_now else "customer_court")),
         "closes": len(close_idx),
         "is_closed": is_closed,
-        "waits_on_us": {**wait_summary(our_waits),
-                        "replies": sum(1 for w in our_waits if w["reply"])},
-        "waits_on_customer": {**wait_summary(cust_waits),
-                              "ended_by_followup": sum(1 for w in cust_waits
-                                                       if w["ended_by"] == "Follow-Up Process")},
+        "close_fallback": close_fallback,
+        "waits_on_us": {
+            **wait_summary(our_waits),
+            "cleared": sum(1 for w in our_waits if w["cleared_by"]),
+            "by_reply": sum(1 for w in our_waits if w["cleared_by"] in REPLY_CLEAR_ACTIONS),
+            "by_manual_clear": sum(1 for w in our_waits if w["cleared_by"] == MANUAL_CLEAR_ACTION),
+            "by_other_clear": sum(1 for w in our_waits if w["cleared_by"] and
+                                  w["cleared_by"] not in REPLY_CLEAR_ACTIONS and
+                                  w["cleared_by"] != MANUAL_CLEAR_ACTION),
+            "max_level": max((level_for(w["bh"], offsets) or 0 for w in our_waits),
+                             default=None) if offsets else None,
+        },
+        "waits_on_customer": {
+            **wait_summary(cust_waits),
+            "ended_by_followup": sum(1 for w in cust_waits if w["ended_by"] == "Follow-Up Process"),
+            "ended_by_customer": sum(1 for w in cust_waits if w["ended_by"] in CUSTOMER_SET_ACTIONS),
+            "ended_by_org_automation": sum(1 for w in cust_waits
+                                           if w["ended_by"] == ORG_AUTOMATION_ACTION),
+        },
+        "rep_logged": rep_logged,
+        "customer_contacts": {
+            "n": len(contacts),
+            "while_open": sum(1 for c in contacts if c["state"] == "open"),
+            "while_resolved": sum(1 for c in contacts if c["state"] == "resolved"),
+            "while_closed": [{k: c[k] for k in ("at", "reply_wait_bh", "level_reached")}
+                             for c in contacts if c["state"] == "closed"],
+        },
+        "resolved_reverted_on_reply": reverted if resolved_statuses else None,
+        "inactive_owners": inactive,
         "handoffs": handoffs,
         "owner_returns": returns,
         "history_start": get(first, START),
@@ -318,20 +452,25 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
 
 
 def decompose_all(cfht: list[dict], cases: list[dict] | None = None,
-                  resolved_statuses: frozenset = frozenset()) -> list[dict]:
+                  resolved_statuses: frozenset = frozenset(),
+                  closed_statuses: frozenset = frozenset()) -> list[dict]:
     require_columns(cfht, [CASE, START, END, FLAG_SET, EVENT, ACTION, BH, HRS], "age_decompose")
-    closed, flagged = {}, {}
+    closed, flagged, closed_on, offsets_by = {}, {}, {}, {}
     for c in cases or []:
         if get(c, "IsClosed") is not None:
             closed[get(c, "Id")] = truthy(get(c, "IsClosed"))
         if "FLAGS__ViewedFlag__c" in c:
             flagged[get(c, "Id")] = get(c, "FLAGS__ViewedFlag__c") is not None
+        closed_on[get(c, "Id")] = parse_dt(get(c, "ClosedDate"))
+        offs = tuple(to_float(get(c, f)) for f in OFFSETS)
+        offsets_by[get(c, "Id")] = offs if all(o is not None for o in offs) else None
     by_case: dict[str, list[dict]] = defaultdict(list)
     for rec in cfht:
         if get(rec, CASE):
             by_case[get(rec, CASE)].append(rec)
     try:
-        return [decompose_case(cid, recs, closed.get(cid), flagged.get(cid), resolved_statuses)
+        return [decompose_case(cid, recs, closed.get(cid), flagged.get(cid), resolved_statuses,
+                               closed_on.get(cid), closed_statuses, offsets_by.get(cid))
                 for cid, recs in by_case.items()]
     except ValueError as error:
         raise SystemExit(_invalid(str(error)))
@@ -400,6 +539,13 @@ def structural_warnings(rows: list[dict]) -> list[str]:
             "the calendar total exceeds it by the after_close time. Report after-close work "
             "separately; it is not part of resolution time."
         )
+    fallback = [r for r in rows if r["close_fallback"]]
+    if fallback:
+        out.append(
+            f"{len(fallback)} case(s) have no Action = 'Case Closed' in their history (the org may "
+            "have Case Flags' 'Clear flag on case close' setting off); closes were found from "
+            "ClosedDate and --closed-statuses instead. Check them before trusting the buckets."
+        )
     mixed = [r for r in rows if r["mixed_speeds"]]
     if mixed:
         out.append(
@@ -450,6 +596,8 @@ def mode_cohort(rows: list[dict], group_by: str | None) -> dict:
                             if m["closes"] > 1 or (m["closes"] and not m["is_closed"])),
             "worked_after_close": sum(1 for m in members if m["cal"]["after_close"] > CALENDAR_TOLERANCE_H),
             "mixed_speeds": sum(1 for m in members if m["mixed_speeds"]),
+            "rep_logged": sum(1 for m in members if m["rep_logged"]),
+            "contact_while_closed": sum(1 for m in members if m["customer_contacts"]["while_closed"]),
             # Per-case wait counts and average wait length, one value per case.
             "waits_on_us_per_case": describe([m["waits_on_us"]["n"] for m in whole]),
             "avg_wait_on_us_bh": describe([m["waits_on_us"]["avg_bh"] for m in whole]),
@@ -547,18 +695,39 @@ def render_factory(bh_per_day: float | None):
                                "History"]))
             if len(payload["cases"]) > 40:
                 print(f"\n+{len(payload['cases']) - 40} more (use --json)")
-            wrows = []
+            wrows, srows = [], []
             for r in payload["cases"][:40]:
                 us, cu = r["waits_on_us"], r["waits_on_customer"]
+                lvl = f" · L{us['max_level']}" if us.get("max_level") else ""
                 wrows.append([
                     r.get("case_number") or r["case"],
-                    f"{us['n']} ({us['replies']} replies)", fnum(us["avg_bh"]), fnum(us["max_bh"]),
-                    f"{cu['n']} ({cu['ended_by_followup']} by follow-up)", fnum(cu["avg_bh"]),
-                    fnum(cu["max_bh"]),
+                    f"{us['n']} ({us['by_reply']} reply, {us['by_manual_clear']} manual)",
+                    fnum(us["avg_bh"]), fnum(us["max_bh"]) + lvl,
+                    f"{cu['n']} ({cu['ended_by_customer']} customer, {cu['ended_by_followup']} "
+                    f"follow-up, {cu['ended_by_org_automation']} org automation)",
+                    fnum(cu["avg_bh"]), fnum(cu["max_bh"]),
                 ])
+                cc = r["customer_contacts"]
+                sig = []
+                if r["rep_logged"]:
+                    sig.append("rep-logged")
+                if cc["while_resolved"]:
+                    sig.append(f"{cc['while_resolved']} contact(s) while resolved")
+                for c in cc["while_closed"]:
+                    lv = f", L{c['level_reached']}" if c["level_reached"] else ""
+                    sig.append(f"contact while closed ({c['at']}) -> reply {fnum(c['reply_wait_bh'])} BH{lv}")
+                if r.get("resolved_reverted_on_reply"):
+                    sig.append(f"resolved status reverted on reply x{r['resolved_reverted_on_reply']}")
+                if r["inactive_owners"]:
+                    sig.append("inactive: " + ", ".join(r["inactive_owners"]))
+                if sig:
+                    srows.append([r.get("case_number") or r["case"], "; ".join(sig)])
             print("\nWaits (BH; customer waits exclude resolved, closed and after-close time)")
             print(table(wrows, ["Case", "Customer waited on us", "Avg", "Longest",
                                 "We waited on customer", "Avg", "Longest"]))
+            if srows:
+                print("\nSignals")
+                print(table(srows, ["Case", "Signal"]))
         elif mode == "cohort":
             for key, g in sorted(payload["groups"].items()):
                 print(f"\n### {payload['group_by'] or 'Cohort'}: {key} ({g['cases']} cases)")
@@ -620,6 +789,10 @@ def main() -> int:
                    help="case/cohort: comma list of statuses that mean resolved, waiting to "
                         "close (e.g. 'Pending Closure'). Flag-down time in them counts as "
                         "post_resolution instead of customer_court. Flag-up time is unchanged.")
+    p.add_argument("--closed-statuses", default="",
+                   help="comma list of the org's closed statuses; only used to find closes "
+                        "when the history has no Action = 'Case Closed' (that Action depends "
+                        "on the 'Clear flag on case close' setting)")
     p.add_argument("--customer-statuses", default="",
                    help="status: comma list of statuses that mean 'waiting on customer'")
     p.add_argument("--edges", default="1,3,7,30",
@@ -655,7 +828,8 @@ def main() -> int:
             else:
                 cases = load_records(args.cases) if args.cases else None
                 resolved = frozenset(x.strip() for x in args.resolved_statuses.split(",") if x.strip())
-                rows = decompose_all(cfht, cases, resolved)
+                closed_st = frozenset(x.strip() for x in args.closed_statuses.split(",") if x.strip())
+                rows = decompose_all(cfht, cases, resolved, closed_st)
                 if not rows:
                     print("No CFHT records with FLAGS__Case__c in input.", file=sys.stderr)
                     return 1  # README contract: 1 = empty input

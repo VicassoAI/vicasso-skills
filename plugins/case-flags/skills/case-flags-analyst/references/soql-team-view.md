@@ -42,8 +42,9 @@ FROM Case
 WHERE OwnerId IN ({REPORT_IDS})
   AND FLAGS__Initial_Response__c != null
   AND FLAGS__Initial_Response__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Initial_Response_Hours__c >= 0.0167
 ```
-Compute each owner's median in code.
+Compute each owner's median in code. The last filter leaves out rep-logged cases (see §5).
 
 ### 7.4 labor_per_clear (all reports; CFHT — the lazy probe for this job)
 Same daily-clear-count method as §5 (`references/soql-overload.md`), grouped by owner and day:
@@ -51,7 +52,7 @@ Same daily-clear-count method as §5 (`references/soql-overload.md`), grouped by
 SELECT FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c)) clear_day, COUNT(Id) clears
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Owner__c IN ({REPORT_IDS})
-  AND FLAGS__Event__c = 'Flag Cleared' AND FLAGS__Action__c != 'Case Closed'
+  AND FLAGS__Event__c = 'Flag Cleared' AND FLAGS__Action__c NOT IN ('Case Closed','Automatically Cleared')
   AND FLAGS__End__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c))
 ```

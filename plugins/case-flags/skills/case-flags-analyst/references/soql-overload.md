@@ -15,8 +15,12 @@ FROM Case
 WHERE OwnerId = '{UID}'
   AND FLAGS__Initial_Response__c != null
   AND FLAGS__Initial_Response__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Initial_Response_Hours__c >= 0.0167
 ```
 Compute the median (in business hours) of the returned values.
+**Rep-logged cases.** A case whose flag was cleared within a minute of creation (`FLAGS__Initial_Response_Hours__c
+< 0.0167`) was logged by someone on our side, not raised by a customer waiting for an answer. Leave those out of
+this median, report how many were left out, and never apply this to Job G's packaged-report reproductions.
 
 ### labor_per_clear (CFHT; this is the lazy probe) — replaces the old ongoing-response median
 
@@ -33,7 +37,7 @@ It's self-calibrating per rep without needing to classify case complexity at all
 SELECT FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c)) clear_day, COUNT(Id) clears
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Owner__c = '{UID}' AND FLAGS__Event__c = 'Flag Cleared'
-  AND FLAGS__Action__c != 'Case Closed' AND FLAGS__End__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
+  AND FLAGS__Action__c NOT IN ('Case Closed','Automatically Cleared') AND FLAGS__End__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c))
 ```
 **Group on `End`, in local time.** `Event` describes the transition that *ended* the record, so the clear

@@ -51,6 +51,7 @@ from collections import defaultdict
 from cfa_common import (
     DataError,
     cfht_sort_key,
+    is_genuine_clear,
     describe,
     emit,
     fnum,
@@ -150,7 +151,7 @@ def split_cases(
         # past the response counts post-response time as "assignment" and drives the
         # response negative.
         ir_index = next(
-            (i for i, r in enumerate(records) if get(r, EVENT) == FLAG_CLEARED), None
+            (i for i, r in enumerate(records) if is_genuine_clear(r)), None
         )
         horizon = ir_index if ir_index is not None else len(records) - 1
         responder = get(records[horizon], OWNER)

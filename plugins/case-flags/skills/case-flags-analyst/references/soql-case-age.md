@@ -41,6 +41,7 @@ WHERE IsClosed = false AND {OWNER_SCOPE} {CF_SCOPE}
 ```sql
 SELECT Id, CaseNumber, Subject, CreatedDate, ClosedDate, IsClosed, FLAGS__ViewedFlag__c, Status, Priority, Origin, Type,
        Reason, Account.Name, Owner.Name, FLAGS__Aging_Speed__c,
+       FLAGS__CaseTimeOffset2__c, FLAGS__CaseTimeOffset3__c, FLAGS__CaseTimeOffset4__c,
        FLAGS__Initial_Response_Business_Hours__c,
        FLAGS__Business_Hours_Age_1__c, FLAGS__Business_Hours_Age_2__c,
        FLAGS__Business_Hours_Age_3__c, FLAGS__Business_Hours_Age_4__c,
@@ -84,8 +85,8 @@ query is also the lazy CFHT probe when it is the session's first CFHT touch.
 ```sql
 SELECT Id, FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Case_Flag_History_Number__c,
        FLAGS__Start__c, FLAGS__End__c,
-       FLAGS__Flag_Set__c, FLAGS__Event__c, FLAGS__Action__c, FLAGS__Owner_Name__c,
-       FLAGS__Queue_Id__c, FLAGS__Case_Status__c, FLAGS__Flag_Level_BH__c,
+       FLAGS__Flag_Set__c, FLAGS__Event__c, FLAGS__Action__c, FLAGS__Owner__c, FLAGS__Owner_Name__c,
+       FLAGS__Owner_Is_Active__c, FLAGS__Queue_Id__c, FLAGS__Case_Status__c, FLAGS__Flag_Level_BH__c,
        FLAGS__Business_Hours_Elapsed__c, FLAGS__Hours_Elapsed__c,
        FLAGS__Business_Hours_in_Age_4__c, FLAGS__Aging_Speed__c
 FROM FLAGS__Case_Flags_History_Tracking__c

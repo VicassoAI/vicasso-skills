@@ -203,6 +203,17 @@ True Case Age (job I):
   Post-resolution: the flag-down STRETCH ending in the case's FINAL close (Action = 'Case Closed'),
     plus flag-down time in any status the person names as resolved (--resolved-statuses).
   Working days: BH ÷ the hours in that calendar's business day (from BusinessHours). Never BH ÷ 24.
+  Rep-logged:   a genuine clear within 60 s of the case's first CFHT record (initial response
+                < 0.0167 h). Excluded from the skill's own initial-response medians (report the
+                count left out); never from job G's reproductions.
+  Housekeeping clears: Action 'Case Closed' or 'Automatically Cleared'. Never a response.
+  Resolved reverted on reply: resolved -> non-resolved status within 60 s of a genuine clear, with
+                no customer contact since the resolved status began. Org automation, not Case Flags.
+  Close fallback: no 'Case Closed' Action -> the transition into a --closed-statuses status, else the
+                record ending within 5 s of ClosedDate (orgs with "Clear flag on case close" off).
+  Spotlight score: triggers fired + max flag level reached + reopens + priority/speed changes +
+                returns to a previous owner; ties by our-court BH. Exclude long-running case types
+                the person names.
 
 Takeaway triggers (job I "Takeaways"; any one earns a case a takeaway line, none means no line):
   Silent customer:   >= 2 waits on the customer ended by the Follow-Up Process AND >= half of them.
@@ -220,6 +231,9 @@ Takeaway triggers (job I "Takeaways"; any one earns a case a takeaway line, none
   After close:       >= 1 BH worked after the final close.
   Queue dwell:       queue time >= the case's ET2 offset (it reached L2 before anyone owned it).
   Lifecycle:         reopened, partial history, or mixed aging speeds.
+  Closed contact:    the customer wrote while the case was closed (flag set on a closed case).
+  Reverted on reply: a resolved status reverted on our reply (org automation; only when resolved
+                     statuses were named).
   Pattern, not a takeaway: a trigger that fires on >= 25% of the cases in a review is stated once
                      for the review (with the count), not repeated as each case's takeaway. A case
                      still gets a takeaway if some OTHER trigger fires for it.

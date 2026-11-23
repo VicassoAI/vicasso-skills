@@ -92,7 +92,7 @@ window. Read in `Start` order, the records reconstruct the responsiveness timeli
 | `FLAGS__Flag_Set__c` | Was the flag UP during this interval. **true = the org's court (customer waiting on us); false = the customer's court (we're waiting on them).** |
 | `FLAGS__Flag_Level__c` / `FLAGS__Flag_Level_BH__c` | Flag level as text **L0–L4** ("useful for analytics"). Prefer the `_BH` variant (it equals the non-BH one when the org isn't using business hours). Lets you read the level directly instead of computing it from escalation times |
 | `FLAGS__Event__c` | Flag Set, Flag Cleared, Case Owner Changed, Case Status Changed. Describes the transition that ENDED this interval |
-| `FLAGS__Action__c` | What initiated it. Validated picklist + observed values: Local Automation, Case Created, Case Closed, Set Flag Button, Clear Flag Button, External/Internal Comment Added, Email Received, Email Sent, Customer Attachment Added, Task Completed, **Follow-Up Process**, **User Action or Non-Flags Automation**. (There is no "Automatically Cleared" value.) |
+| `FLAGS__Action__c` | What initiated it. Values per Vicasso's KB "Case Flags History Tracking Action Field Details" (https://vicasso.lightning.force.com/lightning/r/Knowledge__kav/ka3Vx000001WOhCIAW/view): **Set Flag Button / Clear Flag Button** (a manual set or clear from the case component, page or list view: a product feature, e.g. recording a response made by phone; not a lesser response), **Case Created** ("Set flag on case creation"), **Case Closed** ("Clear flag on case close"), **Email Received / Email Sent** (inbound/outbound email settings), **External Comment Added / Internal Comment Added** (community comment settings), **Customer Attachment Added**, **Task Completed**, **Chatter Post Sent / Chatter Post Received**, **Automatically Cleared** (the nightly "Automatically Clear Flags on Closed Cases" setting, off by default), **Follow-Up Process**, and **Local Automation** ("an action outside of the Case Flags package", e.g. workflow, Apex, Flow or a user action). Which values appear depends on which event rules an org has turned on. "User Action or Non-Flags Automation" has been seen in some data but isn't in the KB list. |
 | `FLAGS__Reason__c` | Free-text reason the flag was set or cleared (when populated) |
 | `FLAGS__Owner__c` / `FLAGS__Owner_Name__c` | Case owner during the interval. **When a queue holds the case, `Owner__c` is null** and the queue's name is in `Owner_Name__c` (with the Id in `Queue_Id__c`). Verified live 2026-11-20. So `Owner__c != null` means a person owned it, and grouping by `Owner_Name__c` mixes queues in with people |
 | `FLAGS__Owner_Is_Active__c` | Whether that owner is still an active user (useful when summarizing past work) |
@@ -140,11 +140,17 @@ Both take `--resolved-statuses`. Don't compare one with the other directly.
 `Event = 'Flag Cleared'` if the case closed while flagged (the housekeeping clear), or
 `Event = 'Case Status Changed'` if the case closed while the flag was already down. In one real org over
 90 days the split was roughly 64% / 36% — filtering on `Event = 'Flag Cleared'` alone misses a third of
-closes. **The close-event test is `Action = 'Case Closed'`, regardless of Event.**
+closes. **The close-event test is `Action = 'Case Closed'`, regardless of Event.** That Action belongs to the
+"Clear flag on case close" setting. An org with that setting off may log no `Case Closed` Action, so
+`scripts/age_decompose.py` falls back to the case's `ClosedDate` and the org's closed statuses
+(`--closed-statuses`) when a case has none, and warns. Recurrence counts and Job H's close tests have no
+such fallback: in an org without the setting, say they may undercount closes.
 
-**Data hygiene for responsiveness:** the housekeeping clear is the `Event = 'Flag Cleared'` +
-`Action = 'Case Closed'` shape (a flag cleared because the case closed, not a human reply) — exclude
-those from response-time analysis. Also be aware that excluded/integration users may appear as the actor.
+**Data hygiene for responsiveness:** housekeeping clears are `Event = 'Flag Cleared'` with
+`Action = 'Case Closed'` (cleared because the case closed) **or** `Action = 'Automatically Cleared'`
+(cleared by the nightly closed-case job). Neither is a response; exclude both from response-time
+analysis (`FLAGS__Action__c NOT IN ('Case Closed','Automatically Cleared')`; in code,
+`cfa_common.is_genuine_clear`). Also be aware that excluded/integration users may appear as the actor.
 
 **Recurrence (reopening after close):** a case can carry more than one close event
 (`Action = 'Case Closed'`, either Event shape above) if it was closed, reopened, and closed again. This

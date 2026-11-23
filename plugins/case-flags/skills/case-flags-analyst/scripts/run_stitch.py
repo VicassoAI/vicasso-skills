@@ -45,6 +45,7 @@ from cfa_common import (
     DataError,
     cfht_sort_key,
     check_variance,
+    is_genuine_clear,
     describe,
     emit,
     fnum,
@@ -149,7 +150,9 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
                     "closing_action": closing_action,
                     # A genuine clear is a human reply. The Flag Cleared + Case Closed
                     # shape is close housekeeping and is excluded everywhere.
-                    "genuine_clear": closing_event == FLAG_CLEARED and not is_close,
+                    # Excludes BOTH housekeeping shapes (Case Closed, Automatically
+                    # Cleared); see cfa_common.HOUSEKEEPING_CLEARS.
+                    "genuine_clear": is_genuine_clear(last),
                     "housekeeping_close": is_close,
                     "closed_run": is_close,
                 }

@@ -146,12 +146,22 @@ For medians, segments or the finer buckets, pull §11.2 rows plus §11.3, then
 
 Every case row also counts the back-and-forth:
 - **Customer waited on us:** each contiguous flag-up stretch inside Salesforce's Age is one wait. The
-  script reports the count, how many ended in a genuine reply, and the average and longest wait.
+  script reports the count, the average and longest wait, the highest flag level it reached
+  (`· L3`, from the case's ET offsets), and how each one ended:
+  - **reply:** a clear from Email Sent, Internal Comment Added or Chatter Post Sent;
+  - **manual:** the Clear Flag button. That is a product feature for a response made some other way
+    (a phone call, a meeting), so describe it neutrally, never as "nothing was sent";
+  - **other:** any other genuine clear (e.g. Local Automation, Task Completed).
+  A clear by `Case Closed` or `Automatically Cleared` is housekeeping, not a response, so it isn't
+  counted as cleared.
 - **We waited on the customer:** each contiguous flag-down stretch of customer-court time is one wait,
   stitched across status and owner changes. Resolved-status time inside it is left out without
-  splitting it. A close, a closed gap or after-close time ends it. The script reports the count, how
-  many were ended by the Follow-Up Process (the customer still hadn't replied), and the average and
-  longest wait.
+  splitting it. A close, a closed gap or after-close time ends it. The script reports the count, the
+  average and longest wait, and how each ended: by the **customer** (an inbound email, comment,
+  attachment or Chatter post), by the **Follow-Up Process** (the customer still hadn't replied), or by
+  **org automation** (`Local Automation`: a Flow, trigger or other process outside the package, e.g.
+  one that re-flags a case on assignment). Label org-automation-ended waits as such; they aren't the
+  customer moving.
 
 Wait totals always equal the our-court and customer-court buckets (built in the same pass). Use them to
 tell the case shapes apart:
@@ -160,6 +170,44 @@ tell the case shapes apart:
 - **Slow replies on our side:** a long average or longest wait on us.
 
 Cohort output gives the per-case medians.
+
+### Signals (any lens; case mode prints a "Signals" table)
+
+Facts the script finds in the history that are worth a line, all product-generic:
+- **Rep-logged:** the flag was genuinely cleared within a minute of the first record. Someone on our
+  side logged the case (often after a call); it wasn't a customer waiting for a first answer. Say so
+  beside the initial response, and leave such cases out of the skill's own initial-response medians
+  (never out of Job G's packaged-report reproductions).
+- **Customer contact while resolved or closed:** each inbound contact (`Flag Set` with a customer
+  Action) is placed in the bucket it arrived in. A flag going up on a closed case is the product working
+  as designed (the customer wrote back); report when it came, how long until a genuine clear, and the
+  level reached. Don't call it a reopen unless the status reopened.
+- **Resolved status reverted on reply:** a resolved status (one the person named with
+  `--resolved-statuses`) changed to a non-resolved status within a minute of a genuine clear, with no
+  customer contact since it was set. Case Flags never changes Status, so this is the org's own
+  automation reacting to the reply. Report it only when resolved statuses were named, and attribute it
+  to org automation.
+- **Close fallback:** no `Case Closed` Action was found, so the close came from the transition into a
+  closed status (`--closed-statuses`) or the record ending at `ClosedDate`. This happens when the org
+  has "Clear flag on case close" turned off. Say the close was inferred.
+- **Inactive owners:** owners on the history whose user is now inactive (`FLAGS__Owner_Is_Active__c`).
+  Name them so nobody tries to follow up with them.
+
+### Case spotlight: "which case had the most interesting story?"
+
+For "the case worth reviewing for each person last week" and similar asks:
+1. **Activity** = CFHT records owned by the person (`FLAGS__Owner__c`) whose `End` falls in the window.
+   A case they touched counts, whoever owns it now.
+2. **Score** each case: the number of takeaway triggers that fire, the highest flag level reached on
+   any wait, reopens, priority or aging-speed changes, and returns to a previous owner. Break ties by
+   our-court BH.
+3. **Exclude** long-running case types the person names (e.g. onboarding or project cases); they win on
+   every measure without being interesting.
+4. Present the winner with Job D's timeline and the evidence behind each point of its score.
+
+This is for learning from cases, not ranking people. The Case Flags best-practice guide says history
+tracking should not be used for punitive tracking of agent performance; say that if a spotlight is
+being used to compare people.
 
 ### Takeaways (any per-case output: this job, Job D, multi-case reviews)
 
@@ -183,6 +231,8 @@ How to write one:
 - **Group them in long reviews.** With many cases, group takeaways by kind (slow replies, long silences,
   slow to close, lifecycle) with the case links, rather than one paragraph per case.
 - **One sentence per case.** If more than one matters, use a second sentence, not a list.
+- **Signals can be takeaways.** A customer contact while closed, and a resolved status reverted on reply
+  (org automation; only when resolved statuses were named), are triggers too (see SKILL.md).
 
 ### Time in status (any lens, needs `Track_Case_Status__c`)
 
@@ -226,6 +276,11 @@ BH, because that mixes calendar hours with business hours.
   comes from `Case.FLAGS__ViewedFlag__c`, so include that field in `--cases`. Business hours aren't
   recorded for it. Say so, and never fold it into the BH buckets or call it zero.
 - **Neutrality.** Customer-court time is not a customer failing, and post-resolution time is not
-  neglect. Report shares and let the numbers speak, just as Job H does.
+  neglect. Report shares and let the numbers speak, just as Job H does. Vicasso's Case Flags
+  best-practice guide says history tracking "should not be used for punitive tracking of agent
+  performance"; True Case Age explains cases, it doesn't grade people.
+- **Close detection.** The close test is `Action = 'Case Closed'`, which needs the "Clear flag on case
+  close" setting. If an org has it off, pass `--closed-statuses` (the org's closed status names) so the
+  script can fall back to the status transition or `ClosedDate`; it warns when it does.
 - **Links.** Render case numbers as links per SKILL.md.
 - **Aggregate before raw.** If the question only needs a rough our-vs-customer split, the §11.2 aggregate is enough (labelled approximate). Anything presented as the customer share, a per-case number or a wait count needs the script.

@@ -60,7 +60,7 @@ Per-case genuine-clear count (excludes the Case Closed housekeeping clear):
 SELECT FLAGS__Case__c, COUNT(Id) clears
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__r.AccountId = '{AID}' AND FLAGS__Event__c = 'Flag Cleared'
-  AND FLAGS__Action__c != 'Case Closed'
+  AND FLAGS__Action__c NOT IN ('Case Closed','Automatically Cleared')
   AND FLAGS__Start__c = LAST_N_DAYS:90 {CF_SCOPE_CFHT}
 GROUP BY FLAGS__Case__c
 ```
@@ -72,7 +72,10 @@ SELECT FLAGS__Initial_Response_Business_Hours__c
 FROM Case
 WHERE AccountId = '{AID}' AND FLAGS__Initial_Response__c != null
   AND FLAGS__Initial_Response__c = LAST_N_DAYS:90 {CF_SCOPE}
+  AND FLAGS__Initial_Response_Hours__c >= 0.0167
 ```
+The last filter leaves out rep-logged cases (see §5 in `references/soql-overload.md`); the §10.10 baseline
+must use the same filter.
 Median in code. This is also the CFHT-unavailable degraded read.
 
 **10.5 Worst severity reached (distinct cases at L3/L4).** Verified live: neither `CaseNumber` nor
@@ -149,7 +152,7 @@ means (Job-G style), not the run-based median profile mode gives.
 **10.9 Outlier / concentration (Job H fuller read — per side).** One grouped pull gives per-case total,
 interval count, and largest single interval; everything the concentration line and the volume-vs-stall
 classification need. Run once with `FLAGS__Flag_Set__c = true` (our court) and once with `= false`
-(customer court, add `AND FLAGS__Action__c != 'Case Closed'`):
+(customer court, add `AND FLAGS__Action__c NOT IN ('Case Closed','Automatically Cleared')`):
 ```sql
 SELECT FLAGS__Case__c, SUM(FLAGS__Business_Hours_Elapsed__c) total,
        COUNT(Id) ints, MAX(FLAGS__Business_Hours_Elapsed__c) max_int
@@ -188,6 +191,7 @@ initial_normal, windowed on `FLAGS__Initial_Response__c` exactly like the accoun
 SELECT AVG(FLAGS__Initial_Response_Business_Hours__c) avg_ir, COUNT(Id) n
 FROM Case
 WHERE FLAGS__Initial_Response__c != null AND FLAGS__Initial_Response__c = LAST_N_DAYS:90
+  AND FLAGS__Initial_Response_Hours__c >= 0.0167
   AND AccountId != null {CF_SCOPE}
 ```
 `ongoing_normal = up_sum ÷ org_clears`; `initial_normal = avg_ir`. Compare **account mean vs org mean** on

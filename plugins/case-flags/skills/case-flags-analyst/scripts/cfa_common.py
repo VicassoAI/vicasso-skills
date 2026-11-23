@@ -30,6 +30,29 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Sequence
 
+# CFHT Action values, per Vicasso's "Case Flags History Tracking Action Field Details" KB.
+# Housekeeping clears are not responses: 'Case Closed' (the "Clear flag on case close"
+# setting) and 'Automatically Cleared' (the nightly "Automatically Clear Flags on Closed
+# Cases" setting, off by default). Every genuine-clear test must exclude both.
+HOUSEKEEPING_CLEARS = frozenset({"Case Closed", "Automatically Cleared"})
+# Flag sets caused by the customer (inbound email, community comment or file, Chatter).
+CUSTOMER_SET_ACTIONS = frozenset({"Email Received", "External Comment Added",
+                                  "Customer Attachment Added", "Chatter Post Received"})
+# Clears that send something to the customer.
+REPLY_CLEAR_ACTIONS = frozenset({"Email Sent", "Internal Comment Added", "Chatter Post Sent"})
+# A manual clear from the component, page or list view: a product feature for recording a
+# response made another way (for example by phone). Not a lesser response.
+MANUAL_CLEAR_ACTION = "Clear Flag Button"
+# "An action outside of the Case Flags package" (workflow, Apex, Flow, or a user action).
+ORG_AUTOMATION_ACTION = "Local Automation"
+
+
+def is_genuine_clear(record: dict) -> bool:
+    """A flag clear that represents a response, not close housekeeping."""
+    return (get(record, "FLAGS__Event__c") == "Flag Cleared"
+            and get(record, "FLAGS__Action__c") not in HOUSEKEEPING_CLEARS)
+
+
 # Business hours in a nominal working day. Single source; see SKILL.md "Tunable constants".
 WORKDAY_HOURS = 8.0
 

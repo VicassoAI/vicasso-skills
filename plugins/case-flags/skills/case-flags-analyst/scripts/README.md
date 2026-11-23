@@ -45,7 +45,10 @@ stop and debug, not report with a caveat.
 Shared helpers, not run directly. `require_columns()` is the silent-zero guard;
 `check_variance()` catches the uniform-population signal; `median`/`percentile`/`describe`
 back every statistic; `weekday_occurrences()` handles the forecast denominator;
-`parse_dt()` copes with Salesforce's `+0000` offsets.
+`parse_dt()` copes with Salesforce's `+0000` offsets. The CFHT Action vocabulary lives here
+once (`HOUSEKEEPING_CLEARS`, `CUSTOMER_SET_ACTIONS`, `REPLY_CLEAR_ACTIONS`,
+`MANUAL_CLEAR_ACTION`, `ORG_AUTOMATION_ACTION`) with `is_genuine_clear()`, so every script
+agrees on what a response is.
 
 ### `cfht_merge.py` — paginated pulls
 Merges pages, dedupes by `Id`, reconciles against a `COUNT(Id)`, validates required columns,
@@ -73,7 +76,8 @@ describe separately. Modes:
 
 Runs beginning at a case's first record are flagged `flagged_at_creation` and excluded from
 the follow-up split rather than guessed at. Genuine clears exclude the
-`Flag Cleared` + `Case Closed` housekeeping shape. `--stall-bar` takes the org's ET3 offset
+housekeeping clears (`Flag Cleared` with Action `Case Closed` or `Automatically Cleared`), via
+`cfa_common.is_genuine_clear`. `--stall-bar` takes the org's ET3 offset
 from Preflight — it is never hardcoded.
 
 ### `assignment_split.py` — Job F
@@ -138,10 +142,24 @@ the court from `Case.FLAGS__ViewedFlag__c`) and never folded into BH. Pass `--ca
 `IsClosed`; without it, a case with activity after its last close stops the run (exit 2),
 because only `IsClosed` tells a reopened case from one worked while closed. `--bh-per-day` adds a working-days column; the
 script never divides BH by 24. `--resolved-statuses` (comma list, e.g. `"Pending Closure"`)
-moves flag-down time in those statuses into post-resolution. Each case also carries
-`waits_on_us` (count, replies, avg, max) and `waits_on_customer` (count, ended by
-follow-up, avg, max), built in the bucket pass so their totals equal the buckets; case
-mode prints them as a second table and cohort mode gives per-case medians.
+moves flag-down time in those statuses into post-resolution. `--closed-statuses` names the
+org's closed statuses so a case with no `Case Closed` Action (the "Clear flag on case close"
+setting off) can fall back to the status transition or `ClosedDate`; the case gets
+`close_fallback` and a warning. Each case also carries, built in the bucket pass so their
+totals equal the buckets:
+
+- `waits_on_us`: n, total/avg/max BH, `cleared`, `by_reply`, `by_manual_clear`,
+  `by_other_clear`, `max_level` (from the case's `CaseTimeOffset2..4`, passed in `--cases`);
+- `waits_on_customer`: n, total/avg/max BH, `ended_by_customer`, `ended_by_followup`,
+  `ended_by_org_automation`;
+- `rep_logged` (genuine clear within 60 s of the first record);
+- `customer_contacts`: n, `while_open`, `while_resolved`, `while_closed` (each closed-case
+  contact with `at`, `reply_wait_bh`, `level_reached`);
+- `resolved_reverted_on_reply` (needs `--resolved-statuses`);
+- `inactive_owners` (from `FLAGS__Owner_Is_Active__c`).
+
+Case mode prints the waits as a second table and a "Signals" table; cohort mode gives
+per-case medians plus rep-logged and contact-while-closed counts.
 
 ```bash
 python3 age_decompose.py --cfht <cache>/cohort.json --cases cases.json \

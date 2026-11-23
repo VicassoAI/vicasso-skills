@@ -34,6 +34,25 @@ than `Local Automation` alone.
   `references/soql-timeline.md` §6.
   Report which trigger path each reopening took (customer activity vs. Follow-Up Process pulling it back);
   do not editorialize about what it implies.
+- **(H) Contact on a closed case** — a `Flag Set` with a customer Action (Email Received, External Comment
+  Added, Customer Attachment Added, Chatter Post Received) while the case is closed. The product raises
+  the flag by design. Report when it came, the time to the next genuine clear, and the level reached
+  (the script's `customer_contacts.while_closed`). It is not a reopen unless the status reopened.
+- **(I) Resolved status reverted on reply** — a resolved status changed to a non-resolved one within a
+  minute of a genuine clear, with no customer contact since it was set. Case Flags never changes Status,
+  so this is the org's own automation; attribute it that way. Only tag it when the person has named the
+  resolved statuses.
+
+Place each customer contact relative to the case's state (open, in a resolved status, or closed) and
+say it neutrally: "the customer wrote while the case sat in Pending Closure" is an observation, not a
+finding.
+
+**Timestamps** are in the user's timezone, with daylight saving applied per date (a timeline crossing a
+DST change shifts by an hour). **Level crossings** come from the case's own thresholds: a flag-up
+stretch crosses L*n* at its start plus `FLAGS__CaseTimeOffset<n>__c` business hours, so say when it
+reached L3, not only that it did. **Working days** use the case's own business-hours calendar; if the
+aging speed changed mid-case, say so, since the hours before and after the change use different
+calendars.
 
 **Step 3 — build the vitals block** (same shape every time, regardless of lens). It always includes the
 case's **True Case Age**: run `scripts/age_decompose.py --mode case` on the §6 pull plus the Case row
@@ -44,10 +63,20 @@ how old. The block has:
 - **True Case Age:** the BH within Age split into waiting on us, waiting on the customer, resolved
   waiting to close, and (when non-zero) closed-gap, after-close and queue time. Give working days where
   the calendar is known.
-- **Waits:** how many times the customer waited on us (with how many ended in a reply, the average and
-  the longest), and how many times we waited on the customer (with how many the Follow-Up Process ended,
-  the average and the longest).
-- **Responsiveness:** initial response time (`Initial_Response_Business_Hours__c`).
+- **Waits:** how many times the customer waited on us, labelled by how each ended (reply, manual clear,
+  other) with the average, the longest and the highest level reached; and how many times we waited on
+  the customer, labelled by how each ended (customer, Follow-Up Process, org automation) with the average
+  and the longest. A manual clear is the Clear Flag button, a product feature for a response made
+  another way; describe it neutrally. An org-automation-ended wait is a process outside Case Flags
+  raising the flag (e.g. on assignment), not the customer.
+- **Responsiveness:** initial response time (`Initial_Response_Business_Hours__c`). If the script says
+  **rep-logged** (cleared within a minute of creation), say "logged by us" instead of quoting a response
+  time.
+- **People:** name any owner whose user is now inactive (`FLAGS__Owner_Is_Active__c = false`).
+- **Now (open cases only):** current status and flag side by side, the follow-up date if set, and whether
+  the case was modified after the last CFHT change (`LastModifiedDate` later than the last record's
+  `End`: something changed that Case Flags doesn't track). Don't judge a status/flag mismatch unless the
+  person has said which statuses mean waiting on the customer.
 - **Shape:** handoff count; status-change count (if tracked);
 breach count (how many separate times it reached L4: count contiguous L4 stretches, not L4 records, since one breach can span several records); follow-up-reflag count; **recurrence count** (number of
 close events — `Action = 'Case Closed'`, either Event shape — beyond the first) and, if any, how each

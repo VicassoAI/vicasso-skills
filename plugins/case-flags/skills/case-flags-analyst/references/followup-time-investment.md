@@ -28,7 +28,7 @@ see §8 in `references/soql-followup-investment.md`). In code, per case:
    record's `Event = 'Flag Set'` describes the transition into this run). If the run starts at the very
    first record for the case, there is no preceding record — the case was flagged at creation; exclude
    it from the follow-up/other split entirely (it's neither) rather than guessing.
-3. **Genuine clear** = the run's last record has `Event = 'Flag Cleared'` AND `Action != 'Case Closed'`
+3. **Genuine clear** = the run's last record has `Event = 'Flag Cleared'` AND `Action` not in (`Case Closed`, `Automatically Cleared`)
    (excludes the housekeeping close shape — see references/field-reference.md "Close events come in two
    shapes").
 4. Bucket genuine clears into `followup_clears` (opening trigger = `Follow-Up Process`) and

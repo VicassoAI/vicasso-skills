@@ -31,19 +31,23 @@ GROUP BY FLAGS__Case__c
 
 **Step 2: every record on those cases** (batch `{CASE_IDS}` at ~200 Ids per query):
 ```sql
-SELECT FLAGS__Owner__c, FLAGS__Case__c, FLAGS__Case_Flag_History_Number__c, FLAGS__Start__c,
-       FLAGS__End__c, FLAGS__Flag_Set__c, FLAGS__Event__c, FLAGS__Action__c
+SELECT Id, FLAGS__Owner__c, FLAGS__Owner_Name__c, FLAGS__Case__c, FLAGS__Case_Flag_History_Number__c,
+       FLAGS__Start__c, FLAGS__End__c, FLAGS__Flag_Set__c, FLAGS__Event__c, FLAGS__Action__c,
+       FLAGS__Business_Hours_Elapsed__c
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__c IN ({CASE_IDS}) AND FLAGS__Start__c = LAST_N_DAYS:90
 ORDER BY FLAGS__Case__c, FLAGS__Start__c ASC
 ```
 
-In code, reconstruct runs per case on the full record set, then keep only runs whose records belong to
-the owner(s) in question. `FLAGS__Case_Flag_History_Number__c` orders records that share a `Start` and
+In code, reconstruct runs per case on the full record set, then keep only runs the owner(s) in
+question cleared: `run_stitch.py --mode followup-split --owners {UID}` attributes each run to the owner
+on its last record (who cleared it), so a flag raised under a queue and answered after assignment
+counts for the person who answered. `Id` lets `cfht_merge.py` merge the batches; the scripts need
+`FLAGS__Business_Hours_Elapsed__c`. `FLAGS__Case_Flag_History_Number__c` orders records that share a `Start` and
 separates "flagged at creation" (history number 001) from runs the 90-day window cut off; see
 `scripts/run_stitch.py`.
 
-An active rep can return 1,000+ raw rows over 90 days (verified live: ~1,977 for one rep) — well within
+An active rep can return 1,000+ raw rows over 90 days (verified: nearly 2,000 for one rep) — well within
 the 50,000-row transaction cap, but don't repeat this pull if the §5 / §7.4 daily-clear-count query
 (`references/soql-overload.md`, `references/soql-team-view.md`) already ran this session for the same
 person/window; reuse is not possible directly (different shape), but avoid

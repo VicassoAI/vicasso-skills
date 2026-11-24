@@ -42,9 +42,9 @@ GROUP BY FLAGS__Owner__c, DAY_ONLY(convertTimezone(FLAGS__End__c))
 ```
 **Group on `End`, in local time.** `Event` describes the transition that *ended* the record, so the clear
 happens at `End`. Grouping on `Start` credits a clear to the day the flag went up, and a plain
-`DAY_ONLY` buckets by UTC day. Verified live on one rep over 90 days: grouping by `Start` gave 68
-"work days", including 4 Sundays and Labor Day with 1–2 clears each, while grouping by local `End` gave
-64. Those phantom low-count days pull the median down and inflate `labor_per_clear`.
+`DAY_ONLY` buckets by UTC day. Verified on production data: grouping by `Start` produced
+phantom "work days" (Sundays and holidays with one or two clears each) that grouping by local `End`
+doesn't. Those phantom low-count days pull the median down and inflate `labor_per_clear`.
 Excluding `Action = 'Case Closed'` matters here for the same reason as the old model — a closed-case clear
 is housekeeping, not a responsiveness action, and would inflate the count on cleanup days. Days with zero
 clears (weekends, PTO, OOO) simply don't appear in the GROUP BY result, which is exactly the exclusion the
@@ -156,11 +156,10 @@ WHERE OwnerId = '{UID}'
 ```
 If the returned `Status` values include something that reads as "with customer" / "awaiting customer"
 (check what's actually present rather than guessing the literal string), narrow the count to that status —
-it's a tighter, more accurate population. Otherwise use the full portable result as-is. In the reference
-org this mattered: the portable query returned 30 cases, but only 24 were literally `Status = 'With
-Customer'` — the other 6 (`On Hold`, `Working / In Development`, `Pending Closure`, `New`) had already
-gotten a first response but weren't in an "awaiting customer" state, so including them overstates the
-With-Customer count. Pair whichever count you land on with the **same-day re-flag rate**:
+it's a tighter, more accurate population. Otherwise use the full portable result as-is. This can matter: in production
+data, a fifth of the portable result had already had a first response but sat in other statuses (on
+hold, in development, pending closure, new), not an "awaiting customer" one, so including them overstates
+the With-Customer count. Pair whichever count you land on with the **same-day re-flag rate**:
 from the re-flag query's raw rows (pull `FLAGS__Start__c` alongside `FLAGS__End__c` for this use), rate =
 (count where `Start__c` date = `End__c` date) ÷ (count of all rows, i.e. all down-intervals that eventually
 re-flagged). Apply that rate to the current With-Customer count to get an expected same-day bounce-back

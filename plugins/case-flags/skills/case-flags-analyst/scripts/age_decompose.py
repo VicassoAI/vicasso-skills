@@ -21,7 +21,7 @@ Buckets (every CFHT interval lands in exactly one top-level bucket):
                    sat closed, then came back.
   after_close      every interval AFTER the final close. Cases can keep working while
                    still closed (a customer emails a closed case, or a "closed" status
-                   such as "Bug Fix Pending" is used as a parking spot). Salesforce's
+                   is used as a parking spot). Salesforce's
                    Age stops at ClosedDate; this time is outside it. Flag-up time here
                    is reported separately as after_close_our_bh.
 
@@ -42,7 +42,7 @@ FLAGS__Event__c, FLAGS__Action__c, FLAGS__Business_Hours_Elapsed__c, FLAGS__Hour
 Recommended: FLAGS__Owner_Name__c, FLAGS__Queue_Id__c, FLAGS__Case_Status__c,
 FLAGS__Business_Hours_in_Age_4__c, FLAGS__Aging_Speed__c.
 Do NOT use FLAGS__Hours_in_Age_4__c for SLA: it applies the band thresholds in
-CALENDAR hours (verified live: 80 h "past SLA" on a case with 0 BH past SLA).
+CALENDAR hours (verified: a case can show many hours "past SLA" with 0 BH past SLA).
 
 Usage
   python3 age_decompose.py --cfht cfht.json --cases cases.json --mode case
@@ -66,6 +66,7 @@ from cfa_common import (
     REPLY_CLEAR_ACTIONS,
     cfht_sort_key,
     check_variance,
+    is_first_record,
     is_genuine_clear,
     describe,
     emit,
@@ -76,6 +77,7 @@ from cfa_common import (
     require_columns,
     table,
     to_float,
+    truthy,
 )
 
 CASE = "FLAGS__Case__c"
@@ -111,14 +113,6 @@ ROLLUP_TOLERANCE_BH = 0.05
 CALENDAR_TOLERANCE_H = 0.25
 
 
-def truthy(value) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "t", "yes", "1"}
-    return bool(value)
-
-
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -136,8 +130,8 @@ def infer_closed(case_id: str, records: list[dict]) -> bool:
     """
     Current open/closed state when Case.IsClosed was not supplied.
 
-    CFHT never writes a running interval (verified live: 0 of 59 open cases had a record
-    with End null), so "has an open-ended record" cannot tell open from closed. What CAN:
+    CFHT never writes a running interval (verified: open cases have no
+    record with End null), so "has an open-ended record" cannot tell open from closed. What CAN:
     no close event -> open; history ends on a close -> closed. A close followed by more
     activity is either a reopened open case or work on a still-closed case, and only
     Case.IsClosed can tell those apart.
@@ -175,11 +169,27 @@ def find_closes(records: list[dict], is_closed: bool, closed_date,
                     and get(records[i + 1], STATUS) in closed_statuses):
                 found.add(i)
     if is_closed and closed_date is not None:
-        for i, r in enumerate(records):
-            end = parse_dt(get(r, END))
-            if end and abs((end - closed_date).total_seconds()) <= CLOSE_DATE_MATCH_SECONDS:
-                found.add(i)
-    return sorted(found), bool(found)
+        # The record whose End is closest to ClosedDate (the latest one on a tie: several
+        # zero-length records can be written in the close transaction). Not "every record
+        # within a few seconds", which would turn one close into several.
+        ends = [(i, parse_dt(get(r, END))) for i, r in enumerate(records)]
+        ends = [(i, e) for i, e in ends if e is not None]
+        if ends:
+            best = min(ends, key=lambda ie: (abs((ie[1] - closed_date).total_seconds()), -ie[0]))
+            found.add(best[0])
+    # One close per close instant: collapse candidates whose Ends are a few seconds apart,
+    # keeping the last record of each group.
+    collapsed: list[int] = []
+    for i in sorted(found):
+        end_i = parse_dt(get(records[i], END))
+        if collapsed:
+            end_prev = parse_dt(get(records[collapsed[-1]], END))
+            if (end_i and end_prev
+                    and abs((end_i - end_prev).total_seconds()) <= CLOSE_DATE_MATCH_SECONDS):
+                collapsed[-1] = i
+                continue
+        collapsed.append(i)
+    return collapsed, bool(collapsed)
 
 
 def level_for(bh: float, offsets) -> int | None:
@@ -193,7 +203,7 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
                    flagged_now: bool | None = None,
                    resolved_statuses: frozenset = frozenset(),
                    closed_date=None, closed_statuses: frozenset = frozenset(),
-                   offsets=None) -> dict:
+                   offsets=None, created_date=None) -> dict:
     """
     Walk one case's intervals in Start order and assign each to a bucket.
 
@@ -278,7 +288,11 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
         was_gap = in_gap
         if truthy(get(rec, FLAG_SET)):
             in_gap = False
-        elif was_gap and get(rec, EVENT) == STATUS_CHANGED and i not in close_set:
+        elif (was_gap and get(rec, EVENT) == STATUS_CHANGED and i not in close_set
+              and not (i + 1 < len(records)
+                       and get(records[i + 1], STATUS) in closed_statuses)):
+            # The status changed out of closed. A move between two closed statuses
+            # (e.g. Closed -> a "fix pending" closed status) is still closed time.
             in_gap = False
         if i in non_final:
             in_gap = True
@@ -311,9 +325,13 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
             seg = None
         elif bucket == "post_resolution" and i != final_close:
             # Resolved-status time: skip it inside a customer wait, but the flag went
-            # down, so an our-wait is over.
+            # down, so an our-wait is over. Inside a customer wait, this record may be
+            # the one that ends it (the customer wrote during Pending Closure), so it
+            # sets the wait's "ended by".
             if seg == "our":
                 seg = None
+            elif seg == "cust":
+                cust_waits[-1]["ended_by"] = get(rec, ACTION)
         else:
             seg = None
         if i in close_set:
@@ -340,9 +358,14 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
 
     # Rep-logged: the flag was cleared within a minute of creation (any genuine clear).
     # The packaged Initial Response for such a case measures nothing about a customer.
+    # Measured from Case.CreatedDate (the same base as FLAGS__Initial_Response_Hours__c).
+    # Without it, only from the first record when that record IS the case's first
+    # (history number 1): a partial history's first record is mid-life.
     rep_logged = False
-    if records and parse_dt(get(records[0], START)):
+    t0 = created_date
+    if t0 is None and records and is_first_record(records[0], unknown=False):
         t0 = parse_dt(get(records[0], START))
+    if t0 is not None:
         for r in records:
             end = parse_dt(get(r, END))
             if end is None or (end - t0).total_seconds() > REP_LOGGED_SECONDS:
@@ -387,6 +410,10 @@ def decompose_case(case_id: str, records: list[dict], is_closed: bool | None = N
                 customer = any(k in contact_idx for k in range(start, i + 1))
                 if replied and not customer:
                     reverted += 1
+                start = None
+            if i in close_set:
+                # A resolved stretch that leads into a close ends there; a later resolved
+                # stretch (after a reopen) starts fresh.
                 start = None
 
     inactive = sorted({get(r, OWNER) for r in records
@@ -455,13 +482,17 @@ def decompose_all(cfht: list[dict], cases: list[dict] | None = None,
                   resolved_statuses: frozenset = frozenset(),
                   closed_statuses: frozenset = frozenset()) -> list[dict]:
     require_columns(cfht, [CASE, START, END, FLAG_SET, EVENT, ACTION, BH, HRS], "age_decompose")
-    closed, flagged, closed_on, offsets_by = {}, {}, {}, {}
+    if resolved_statuses or closed_statuses:
+        # Without the status column these options would silently do nothing.
+        require_columns(cfht, [STATUS], "age_decompose --resolved-statuses/--closed-statuses")
+    closed, flagged, closed_on, offsets_by, created_on = {}, {}, {}, {}, {}
     for c in cases or []:
         if get(c, "IsClosed") is not None:
             closed[get(c, "Id")] = truthy(get(c, "IsClosed"))
         if "FLAGS__ViewedFlag__c" in c:
             flagged[get(c, "Id")] = get(c, "FLAGS__ViewedFlag__c") is not None
         closed_on[get(c, "Id")] = parse_dt(get(c, "ClosedDate"))
+        created_on[get(c, "Id")] = parse_dt(get(c, "CreatedDate"))
         offs = tuple(to_float(get(c, f)) for f in OFFSETS)
         offsets_by[get(c, "Id")] = offs if all(o is not None for o in offs) else None
     by_case: dict[str, list[dict]] = defaultdict(list)
@@ -470,7 +501,8 @@ def decompose_all(cfht: list[dict], cases: list[dict] | None = None,
             by_case[get(rec, CASE)].append(rec)
     try:
         return [decompose_case(cid, recs, closed.get(cid), flagged.get(cid), resolved_statuses,
-                               closed_on.get(cid), closed_statuses, offsets_by.get(cid))
+                               closed_on.get(cid), closed_statuses, offsets_by.get(cid),
+                               created_on.get(cid))
                 for cid, recs in by_case.items()]
     except ValueError as error:
         raise SystemExit(_invalid(str(error)))
@@ -814,6 +846,8 @@ def main() -> int:
                 print("No records in input.", file=sys.stderr)
                 return 1
             edges = sorted(float(x) for x in args.edges.split(",") if x.strip())
+            if args.followup_field:
+                require_columns(cases, [args.followup_field], "age_decompose backlog --followup-field")
             payload = mode_backlog(cases, edges, args.followup_field)
         else:
             if not args.cfht:
@@ -827,6 +861,14 @@ def main() -> int:
                 payload = mode_status(cfht, statuses)
             else:
                 cases = load_records(args.cases) if args.cases else None
+                if args.closed_statuses and not cases:
+                    # An org without 'Case Closed' Actions can't tell open from closed
+                    # from the history alone; only Case.IsClosed can.
+                    raise DataError("--closed-statuses needs --cases with IsClosed and ClosedDate")
+                if args.mode == "cohort" and args.group_by:
+                    if not cases:
+                        raise DataError("--group-by reads a Case field, so it needs --cases")
+                    require_columns(cases, [args.group_by], "age_decompose cohort --group-by")
                 resolved = frozenset(x.strip() for x in args.resolved_statuses.split(",") if x.strip())
                 closed_st = frozenset(x.strip() for x in args.closed_statuses.split(",") if x.strip())
                 rows = decompose_all(cfht, cases, resolved, closed_st)

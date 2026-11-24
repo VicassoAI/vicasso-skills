@@ -75,7 +75,11 @@ describe separately. Modes:
 | `down-intervals` | H customer turnaround | per-wait flag-down stats; waits ending in a close, closed-gap and window-cut waits excluded |
 
 Runs beginning at a case's first record are flagged `flagged_at_creation` and excluded from
-the follow-up split rather than guessed at. Genuine clears exclude the
+the follow-up split rather than guessed at. Each run belongs to the owner on its last record
+(who cleared it); `--owners` keeps only clears by the named owner Ids or names, since §8
+pulls every record on the rep's cases. Options that read a column (`--resolved-statuses`
+needs `FLAGS__Case_Status__c`) fail with exit `2` when it isn't selected, rather than
+silently doing nothing. Genuine clears exclude the
 housekeeping clears (`Flag Cleared` with Action `Case Closed` or `Automatically Cleared`), via
 `cfa_common.is_genuine_clear`. `--stall-bar` takes the org's ET3 offset
 from Preflight — it is never hardcoded.
@@ -144,15 +148,17 @@ because only `IsClosed` tells a reopened case from one worked while closed. `--b
 script never divides BH by 24. `--resolved-statuses` (comma list, e.g. `"Pending Closure"`)
 moves flag-down time in those statuses into post-resolution. `--closed-statuses` names the
 org's closed statuses so a case with no `Case Closed` Action (the "Clear flag on case close"
-setting off) can fall back to the status transition or `ClosedDate`; the case gets
-`close_fallback` and a warning. Each case also carries, built in the bucket pass so their
+setting off) can fall back to the status transition or the record ending closest to
+`ClosedDate` (one close per close instant); the case gets `close_fallback` and a warning. It
+requires `--cases`. `--group-by`, `--followup-field` and the status options likewise
+require their columns. Each case also carries, built in the bucket pass so their
 totals equal the buckets:
 
 - `waits_on_us`: n, total/avg/max BH, `cleared`, `by_reply`, `by_manual_clear`,
   `by_other_clear`, `max_level` (from the case's `CaseTimeOffset2..4`, passed in `--cases`);
 - `waits_on_customer`: n, total/avg/max BH, `ended_by_customer`, `ended_by_followup`,
   `ended_by_org_automation`;
-- `rep_logged` (genuine clear within 60 s of the first record);
+- `rep_logged` (genuine clear within 60 s of `CreatedDate`; never on partial history);
 - `customer_contacts`: n, `while_open`, `while_resolved`, `while_closed` (each closed-case
   contact with `at`, `reply_wait_bh`, `level_reached`);
 - `resolved_reverted_on_reply` (needs `--resolved-statuses`);
@@ -164,6 +170,15 @@ per-case medians plus rep-logged and contact-while-closed counts.
 ```bash
 python3 age_decompose.py --cfht <cache>/cohort.json --cases cases.json \
     --mode cohort --group-by Priority --bh-per-day 10
+```
+
+## Tests
+
+`tests/` holds synthetic-record regression tests for edge cases found in review (no org
+data). Run them from this directory:
+
+```bash
+python3 -m unittest discover -s tests
 ```
 
 ## Not scripted, deliberately

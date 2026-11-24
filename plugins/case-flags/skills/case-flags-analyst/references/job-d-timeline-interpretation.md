@@ -85,7 +85,7 @@ applied.
 
 **The "silent auto-close" pattern (Tier 2 — ambiguous, always neutral).** A case that gets a short final
 response, then times out into an automated-close status (readable directly from `FLAGS__Case_Status__c` on
-the closing record — e.g. one org's `"Closed (Automated)"` — since status is already a tracked CFHT
+the closing record — e.g. a status like `"Closed (Automated)"` — since status is already a tracked CFHT
 field) with no further customer engagement before that close, has a recognizable shape: one short
 `Follow-Up Process`-driven cycle at the end, then closure with nothing after it. **This shape alone cannot
 tell you whether the customer was satisfied or gave up — both look identical in CFHT.** Surface it as

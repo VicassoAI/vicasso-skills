@@ -162,6 +162,12 @@ def main() -> int:
         # Cache only a pull that reconciles (or wasn't asked to): a short pull cached as
         # "reuse this path" would quietly feed every later job in the session.
         if reconciliation and not reconciliation["passed"]:
+            # An older cache at the same path would still look like a usable pull for
+            # this label, so move it aside (kept, renamed .stale) rather than leave it.
+            if out_path and os.path.exists(out_path):
+                os.replace(out_path, out_path + ".stale")
+                warnings.append(f"Moved the earlier cache at {out_path} to {out_path}.stale: "
+                                "it doesn't match this pull, so don't reuse it.")
             out_path = None
         else:
             # 0600: the cache holds real case data, not scratch.

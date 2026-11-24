@@ -4,8 +4,9 @@ Backlog snapshot, closed-cohort population, the cohort CFHT pull, and the `CaseH
 time-in-status.
 
 > Placeholders (`{UID}`, `{REPORT_IDS}`, `{FOLLOW_UP_ON}`, `{CF_SCOPE}`) are defined in
-> `references/soql-preflight.md`. `{OWNER_SCOPE}` below means whichever owner filter the ask needs
-> (`OwnerId = '{UID}'`, `OwnerId IN ({REPORT_IDS})`, or nothing for org-wide).
+> `references/soql-preflight.md`. `{OWNER_SCOPE}` below means whichever owner filter the ask needs,
+> **including its leading `AND`**: `AND OwnerId = '{UID}'`, `AND OwnerId IN ({REPORT_IDS})`, or empty for
+> org-wide.
 
 ## 11.1 Open backlog (lens b — Case fields only, no CFHT)
 
@@ -16,7 +17,7 @@ SELECT Id, CaseNumber, Subject, Status, Priority, Origin, Owner.Name, CreatedDat
        FLAGS__Business_Hours_Age_1__c, FLAGS__Business_Hours_Age_2__c,
        FLAGS__Business_Hours_Age_3__c, FLAGS__Business_Hours_Age_4__c
 FROM Case
-WHERE IsClosed = false AND {OWNER_SCOPE} {CF_SCOPE}
+WHERE IsClosed = false {OWNER_SCOPE} {CF_SCOPE}
 ORDER BY CreatedDate ASC
 LIMIT 2000
 ```
@@ -28,9 +29,11 @@ more than 2,000 open cases in scope, run the counts as aggregates instead. SOQL 
 ```sql
 SELECT COUNT(Id) total, COUNT(FLAGS__ViewedFlag__c) flagged, COUNT({FOLLOW_UP_ON}) follow_up_set
 FROM Case
-WHERE IsClosed = false AND {OWNER_SCOPE} {CF_SCOPE}
-  AND CreatedDate < LAST_N_DAYS:7 AND CreatedDate = LAST_N_DAYS:30   -- the 7–30d bucket
+WHERE IsClosed = false {OWNER_SCOPE} {CF_SCOPE}
+  AND CreatedDate < LAST_N_DAYS:7 AND CreatedDate = LAST_N_DAYS:30
 ```
+
+That example is the 7–30d bucket. SOQL has no comment syntax, so keep notes like that outside the query.
 
 `COUNT(field)` counts non-null values, so "forgotten" in that bucket is not
 `total − flagged − follow_up_set` (a case can have both). Get it directly by adding
@@ -47,15 +50,15 @@ SELECT Id, CaseNumber, Subject, CreatedDate, ClosedDate, IsClosed, FLAGS__Viewed
        FLAGS__Business_Hours_Age_3__c, FLAGS__Business_Hours_Age_4__c,
        FLAGS__Hours_Age_1__c, FLAGS__Hours_Age_2__c, FLAGS__Hours_Age_3__c, FLAGS__Hours_Age_4__c
 FROM Case
-WHERE IsClosed = true AND ClosedDate = LAST_N_DAYS:{N} AND {OWNER_SCOPE} {CF_SCOPE}
+WHERE IsClosed = true AND ClosedDate = LAST_N_DAYS:{N} {OWNER_SCOPE} {CF_SCOPE}
 ORDER BY ClosedDate DESC
 ```
 
 `{N}` must stay inside the history window (`FLAGS__HistoryTrackingMonths__c` from Preflight), or the
 older cases will show partial history. The band rollups are what makes the **no-CFHT degraded read**
 possible (see the job file): the sum of `Business_Hours_Age_1..4` equals the case's total flag-up
-(our-court) BH, and `Business_Hours_Age_4` is the time past SLA. Verified live (2026-11-20): 37 of 37
-checked closed cases matched the CFHT flag-up sum to within 0.001 BH. Don't select the calendar
+(our-court) BH, and `Business_Hours_Age_4` is the time past SLA. Verified: closed cases match
+the CFHT flag-up sum to within 0.001 BH. Don't select the calendar
 `FLAGS__Hours_Age_*` fields for SLA; they use calendar-hour thresholds.
 
 **Aggregate first, as a rough headline.** For a quick "how much of our cohort's age is ours", one GROUP

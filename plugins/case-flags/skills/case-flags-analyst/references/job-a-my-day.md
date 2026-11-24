@@ -24,8 +24,8 @@ Then six sections (all scoped to the current user, selective-scope applied, in t
 4. **Follow-ups due today** — unflagged cases I own whose Follow-Up On date is today; show Next Steps and
    Status. These are the "what do I pick up when my flags are clear" list. (§3.)
 5. **Overdue follow-ups** — open, unflagged cases I own whose Follow-Up On date is already past. The
-   Follow-Up Process didn't bring them back, and no other section shows them (one live org had two such
-   cases, years overdue). Oldest date first; show the date, Next Steps and Status. (§3b.)
+   Follow-Up Process didn't bring them back, and no other section shows them (such cases can be years
+   overdue). Oldest date first; show the date, Next Steps and Status. (§3b.)
 6. **Open Cases** — unflagged cases I own with no follow-up date, ordered by longest-since-activity, top 5.
    A scheduled follow-up means a case is *not* falling through the cracks, so those are excluded here;
    this bucket surfaces the genuinely quiet ones. Show Status. (§4.)

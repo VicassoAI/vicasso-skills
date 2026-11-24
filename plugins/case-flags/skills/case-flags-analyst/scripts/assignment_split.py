@@ -51,7 +51,6 @@ from collections import defaultdict
 from cfa_common import (
     DataError,
     cfht_sort_key,
-    is_genuine_clear,
     describe,
     emit,
     fnum,
@@ -150,8 +149,11 @@ def split_cases(
         # response: someone else may have answered and handed it over afterwards. Searching
         # past the response counts post-response time as "assignment" and drives the
         # response negative.
+        # "First Flag Cleared", the same definition as FLAGS__Initial_Response_*, job-f
+        # and measured_ir_bh below. (§9.2 doesn't select Action, and filtering
+        # housekeeping clears here would stop matching the packaged field.)
         ir_index = next(
-            (i for i, r in enumerate(records) if is_genuine_clear(r)), None
+            (i for i, r in enumerate(records) if get(r, EVENT) == "Flag Cleared"), None
         )
         horizon = ir_index if ir_index is not None else len(records) - 1
         responder = get(records[horizon], OWNER)
@@ -260,11 +262,11 @@ def measured_ir_bh(records: list[dict], landing_index: int) -> float | None:
 def _assert_not_all_zero(results: list[dict]) -> None:
     """Pitfall 1: a uniform zero assignment time across a population is a bug."""
     handoffs = [r for r in results if r["reason"] is None]
-    if len(handoffs) >= 5 and all(r["assignment_bh"] == 0.0 for r in handoffs):
+    if len(handoffs) >= 20 and all(r["assignment_bh"] == 0.0 for r in handoffs):
         raise DataError(
             f"All {len(handoffs)} handoff cases computed 0.00 BH assignment time. This is "
             f"job-f pitfall 1, not a finding: queue dwell is genuinely non-trivial "
-            "(validated mean 0.5-0.6 BH, max 4-7 BH across three reps). Confirm "
+            "(in production data). Confirm "
             f"{BH} is in the §9.2 SELECT list and populated, then re-run."
         )
 

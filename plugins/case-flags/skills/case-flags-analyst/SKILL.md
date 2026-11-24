@@ -2,7 +2,7 @@
 name: case-flags-analyst
 license: Apache-2.0
 compatibility: Requires a connected Salesforce MCP server with read access to the Case Flags managed package (FLAGS__), and Python 3.9+ for the bundled scripts.
-description: Personal and managerial responsiveness analyst for the Vicasso Case Flags managed package, working over a connected Salesforce MCP. Use this whenever someone asks about their Case Flags work in plain language — "what's my day look like", "my flagged cases", "what should I work on", "am I overloaded / do I have a light day", "what's due today", "what's falling through the cracks" — or, for managers, "how is my team doing", "who's overloaded", "who needs help". Also use for Case Flags responsiveness questions - initial response time, ongoing responsiveness, interpreting Case Flags History Tracking, and going beyond the standard packaged reports. Also use for case age questions ("true case age", "why is this case so old", "how old is our backlog", "time in status", "how much of our resolution time is us vs the customer") — a breakdown of Salesforce's Age into our time vs the customer's. Trigger even when the person doesn't say "Case Flags" by name, as long as the org has Case Flags installed and the request is about flagged cases, follow-ups, response times, or triaging support work by urgency.
+description: Personal and managerial responsiveness analyst for the Vicasso Case Flags managed package, over a connected Salesforce MCP. Use whenever someone asks about their Case Flags work in plain language — "what's my day look like", "my flagged cases", "what should I work on", "am I overloaded", "what's due today", "what's falling through the cracks" — or, for managers, "how is my team doing", "who's overloaded", "who needs help". Also for responsiveness (initial and ongoing response time, Case Flags History Tracking, beyond the packaged reports) and case age ("true case age", "why is this case so old", "how old is our backlog", "time in status", our time vs the customer's). Trigger even when Case Flags isn't named, if the org has it installed and the ask is about flagged cases, follow-ups, response times or triage by urgency.
 ---
 
 # Case Flags Analyst
@@ -226,8 +226,8 @@ Takeaway triggers (job I "Takeaways"; any one earns a case a takeaway line, none
                      Age AND >= the case's ET3 offset (e.g. On Hold, or "Working" with the flag
                      down). Flag-up time in New/Working is normal work, not parking.
   Slow to close:     resolved-not-closed >= 1.5x the comparison median among cases that had any
-                     (no set: >= 30 BH). Not a share of Age: a fixed close timer (one live org:
-                     ~20 BH in Pending Closure) dominates short cases and is normal.
+                     (no set: >= 30 BH). Not a share of Age: a fixed close timer (e.g. a set
+                     number of BH in a pending-closure status) dominates short cases and is normal.
   After close:       >= 1 BH worked after the final close.
   Queue dwell:       queue time >= the case's ET2 offset (it reached L2 before anyone owned it).
   Lifecycle:         reopened, partial history, or mixed aging speeds.
@@ -237,7 +237,7 @@ Takeaway triggers (job I "Takeaways"; any one earns a case a takeaway line, none
   Pattern, not a takeaway: a trigger that fires on >= 25% of the cases in a review is stated once
                      for the review (with the count), not repeated as each case's takeaway. A case
                      still gets a takeaway if some OTHER trigger fires for it.
-  Calibrated 2026-11-20 on 55 live cases: the first draft of these rules fired on 48 of 55.
+  Calibrated on production cases: looser rules fired on nearly every case.
   Comparison median: the other cases in the same review when there are >= 5; otherwise the org's
                      own trailing-90-day medians if already computed this session; otherwise the
                      fixed fallback above. Never compare across aging speeds raw.

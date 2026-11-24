@@ -12,7 +12,7 @@ minus any after-close time, reconciles to it.
 
 ## Why this beats the standard options (say this when someone asks "why not just use Age?")
 
-Facts below are from Salesforce Help and the linked KB articles, read 2026-11-20:
+Facts below are from Salesforce Help and the linked KB articles:
 
 - **Age** is report-only. It is not a real field (it can't go on layouts or list views), it can be shown
   in days, hours or minutes, and it **ignores holidays**.
@@ -29,9 +29,9 @@ Facts below are from Salesforce Help and the linked KB articles, read 2026-11-20
 What Case Flags adds:
 - **Court.** CFHT records whether the customer was waiting on us (`Flag_Set = true`) or we were waiting
   on them.
-- **Holidays.** CFHT business-hours elapsed **does skip holidays**. Verified live on 2026-11-20: a
-  Thursday-to-Tuesday interval spanning the org's Jul 3 holiday counted 19.2 BH (Thursday, Monday and a
-  sliver of Tuesday, with Friday excluded). It runs on each case's own aging-speed calendar.
+- **Holidays.** CFHT business-hours elapsed **does skip holidays** (verified on production
+  data): an interval spanning a holiday counts no hours for that day. It runs on each case's own
+  aging-speed calendar.
 - **SLA bands.** Band time per interval (`Business_Hours_in_Age_1..4`), so "past SLA" is measured, not
   inferred.
 
@@ -44,18 +44,16 @@ days and label it "calendar". When cases on different aging speeds use different
 working days aren't directly comparable across them (SKILL.md: never compare raw across aging speeds).
 
 **Aging speed is per interval, not per case.** Each CFHT record's BH follows the calendar of the aging
-speed in effect for that interval. Verified 2026-11-20: 22 of 22 intervals on two cases that moved from
-a 10-hour calendar to a 6-hour one matched their own interval's calendar. `Case.FLAGS__Aging_Speed__c`
+speed in effect for that interval (verified on cases that changed calendars partway through).
+`Case.FLAGS__Aging_Speed__c`
 holds only the latest speed. So:
 - Segment by `FLAGS__Aging_Speed__c` on **CFHT** (§11.2 aggregate), not on Case.
 - For cases the script marks `mixed-speed`, don't convert BH to working days with a single divisor.
   Show BH and say the case changed calendars partway through.
 
-**Holidays follow each calendar's own holiday list.** In the same check, 28 of 30 cases matched an
-independent recompute to within 0.01 BH across weekends, a short-Friday calendar and four holidays; the
-other 2 were the mixed-speed cases above. Two calendars skipped all four holidays. One 07:00–23:00
-calendar did **not** skip Juneteenth, because that holiday wasn't attached to it. Case Flags does what the
-calendar says. If BH looks high around a holiday, check the calendar's holiday list before doubting the
+**Holidays follow each calendar's own holiday list.** An independent recompute matched CFHT across
+weekends, short days and holidays, except where a holiday wasn't attached to a calendar: that calendar
+counted the day as a working day. Case Flags does what the calendar says. If BH looks high around a holiday, check the calendar's holiday list before doubting the
 data, and mention it as a possible configuration gap.
 
 ## The buckets
@@ -66,18 +64,17 @@ Every CFHT interval lands in exactly one bucket. The script owns the walk: `scri
 |---|---|---|
 | **Our court** | The customer is waiting on us; this is the controllable part | `Flag_Set = true` |
 | ↳ of which **in a queue** | Waiting with no named owner | flag up and `Queue_Id__c` populated |
-| ↳ of which **past SLA** | Time in the L4 band | `Business_Hours_in_Age_4__c` on flag-up intervals. **Never** the calendar-band `Hours_in_Age_4__c` / `Case.FLAGS__Hours_Age_4__c`: those apply the thresholds in calendar hours (one live case showed 80 h "past SLA" against 0 BH) |
+| ↳ of which **past SLA** | Time in the L4 band | `Business_Hours_in_Age_4__c` on flag-up intervals. **Never** the calendar-band `Hours_in_Age_4__c` / `Case.FLAGS__Hours_Age_4__c`: those apply the thresholds in calendar hours (a case can show many calendar hours "past SLA" with no BH past SLA) |
 | **Customer court** | We are waiting on them | `Flag_Set = false`, not one of the next two |
 | **Post-resolution** | The final wait before the case closed | the flag-down **stretch** that ends in the **final** `Action = 'Case Closed'` (all contiguous flag-down records, so a status change minutes before the close doesn't leave a stub customer wait), plus flag-down time in any `--resolved-statuses` |
 | **Closed gap** | The case sat closed, then reopened | flag-down records from a **non-final** close until the reopen: the flag going up, or the status change that reopens it |
 | **After close** | Work done while the case stayed closed | every interval **after** the final close; flag-up time inside it is reported separately |
 
-**After close is real and common.** The 2026-11-20 check of 30 live cases found 2 cases with history
-continuing past `ClosedDate` and no reopen:
+**After close is real.** Production data shows cases whose history continues past `ClosedDate` with
+no reopen, for example:
 - A customer emailed an automation-closed case, the flag went up, the rep replied, and the case stayed
   closed.
-- A case was parked in a status the org defines as closed ("Bug Fix Pending") while work continued for
-  a week.
+- A case was parked in a status the org defines as closed while work continued.
 
 Salesforce's Age stops at `ClosedDate`, so this time is outside it. Keep it out of resolution time and
 out of the controllable median, and report it as its own line. It often signals a closed status used as
@@ -86,8 +83,8 @@ after-close flag-up time; the script accounts for that in its cross-check.
 
 `Action = 'Case Closed'` is the close test regardless of `Event` (see `references/field-reference.md`).
 **Org-specific resolved statuses.** Many orgs have a status that means "resolved, waiting out a close
-timer" (one live org: "Pending Closure"). Flag-down time in that status isn't the customer's move. Pass
-it with `--resolved-statuses "Pending Closure"` so that time counts as post-resolution wherever it occurs,
+timer" (for example "Pending Closure"). Flag-down time in that status isn't the customer's move. Pass
+it with `--resolved-statuses "<status>"` so that time counts as post-resolution wherever it occurs,
 not only in the final interval. Flag-up time in that status stays in our court, because the customer
 wrote back. Read the status names off `--mode status`, and ask the person before applying this: it's
 their definition, not the package's.
@@ -132,7 +129,9 @@ time since then isn't in CFHT or the rollups.
 
 Run the §11.2 aggregate first for a rough headline in one query. It overstates the customer share because it can't separate resolved, closed and after-close time, so label it approximate.
 For medians, segments or the finer buckets, pull §11.2 rows plus §11.3, then
-`--mode cohort [--group-by Priority|Origin|Type|Reason|FLAGS__Aging_Speed__c|Owner.Name]`. Lead with:
+`--mode cohort [--group-by Priority|Origin|Type|Reason|Owner.Name]`. `--group-by` reads Case fields, so
+don't group by `FLAGS__Aging_Speed__c` here: a case whose speed changed would land under its current
+speed only. Segment aging speed on CFHT instead (see Units). Lead with:
 
 - **Share of age by bucket**, and **controllable BH per case** (median, p90, mean and tail ratio; the
   mean/median tail rule from SKILL.md applies).
@@ -174,7 +173,9 @@ Cohort output gives the per-case medians.
 ### Signals (any lens; case mode prints a "Signals" table)
 
 Facts the script finds in the history that are worth a line, all product-generic:
-- **Rep-logged:** the flag was genuinely cleared within a minute of the first record. Someone on our
+- **Rep-logged:** the flag was genuinely cleared within a minute of the case's creation (pass
+  `CreatedDate` in `--cases`; without it, only when the first record is the case's first, so partial
+  history never qualifies). Someone on our
   side logged the case (often after a call); it wasn't a customer waiting for a first answer. Say so
   beside the initial response, and leave such cases out of the skill's own initial-response medians
   (never out of Job G's packaged-report reproductions).
@@ -226,8 +227,8 @@ How to write one:
   for example "if On Hold here means parked on our side, the customer share overstates it".
 - **Patterns are said once.** A trigger that fires on a quarter or more of the cases in a review is a
   pattern, not an exception: state it once for the review with its count, and don't repeat it as each
-  case's takeaway. The same goes for things like a status still reading "With Customer" during ~60% of
-  waiting-on-us time on every case (one live org).
+  case's takeaway. The same goes for things like a status still reading "With Customer" during most of
+  the waiting-on-us time on every case.
 - **Group them in long reviews.** With many cases, group takeaways by kind (slow replies, long silences,
   slow to close, lifecycle) with the case links, rather than one paragraph per case.
 - **One sentence per case.** If more than one matters, use a second sentence, not a list.
@@ -262,16 +263,15 @@ BH, because that mixes calendar hours with business hours.
 - **Partial history.** If CFHT starts after `Case.CreatedDate` (retention window or pre-install), the
   script warns. Say the breakdown covers only part of Age and keep those cases out of cohort medians, or
   bound the cohort to cases created inside the window. Apply Job G's post-install cutoff the same way.
-- **Reopened cases.** Salesforce clears `ClosedDate` on reopen (verified live: open cases with close
-  events in CFHT have a null `ClosedDate`), so their Age runs from creation to now. Only a case that is
+- **Reopened cases.** Salesforce clears `ClosedDate` on reopen (verified: open cases with close events
+  in CFHT have a null `ClosedDate`), so their Age runs from creation to now. Only a case that is
   closed **now** has a final close. Pass `--cases` with `IsClosed`, so a reopened open case's earlier
   closes count as closed gaps rather than putting everything after them in "after close". Without
   `--cases`, the script infers the state only when it's unambiguous: no close means open, and history
   ending on a close means closed. A close followed by more activity stops the run until `IsClosed` is
   supplied.
 - **Open cases: the current stretch isn't in CFHT.** CFHT writes a record only when something changes.
-  It never writes a running interval (verified live: 0 of 59 open cases had a record with a null
-  `End`). The time from the last record's `End` to now is therefore missing from every CFHT total and
+  It never writes a running interval (verified: open cases have no record with a null `End`). The time from the last record's `End` to now is therefore missing from every CFHT total and
   from the Case rollups. The script reports it as "Since last change (calendar h, court)". The court
   comes from `Case.FLAGS__ViewedFlag__c`, so include that field in `--cases`. Business hours aren't
   recorded for it. Say so, and never fold it into the BH buckets or call it zero.
@@ -280,7 +280,10 @@ BH, because that mixes calendar hours with business hours.
   best-practice guide says history tracking "should not be used for punitive tracking of agent
   performance"; True Case Age explains cases, it doesn't grade people.
 - **Close detection.** The close test is `Action = 'Case Closed'`, which needs the "Clear flag on case
-  close" setting. If an org has it off, pass `--closed-statuses` (the org's closed status names) so the
-  script can fall back to the status transition or `ClosedDate`; it warns when it does.
+  close" setting. If an org has it off, pass `--closed-statuses` (the org's closed status names) with
+  `--cases` so the script can fall back to the status transition or `ClosedDate`; it warns when it
+  does, and refuses `--closed-statuses` without `--cases`, since the history alone can't tell open from
+  closed there. `--closed-statuses` also keeps a closed gap open across a move between two closed
+  statuses.
 - **Links.** Render case numbers as links per SKILL.md.
 - **Aggregate before raw.** If the question only needs a rough our-vs-customer split, the §11.2 aggregate is enough (labelled approximate). Anything presented as the customer share, a per-case number or a wait count needs the script.

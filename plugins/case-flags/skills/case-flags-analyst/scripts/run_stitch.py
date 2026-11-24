@@ -45,7 +45,10 @@ from cfa_common import (
     DataError,
     cfht_sort_key,
     check_variance,
+    is_first_record,
     is_genuine_clear,
+    is_housekeeping_clear,
+    truthy,
     describe,
     emit,
     fnum,
@@ -70,15 +73,6 @@ BH = "FLAGS__Business_Hours_Elapsed__c"
 FOLLOW_UP_TRIGGER = "Follow-Up Process"
 CASE_CLOSED = "Case Closed"
 FLAG_CLEARED = "Flag Cleared"
-
-
-def truthy(value) -> bool:
-    """Flag_Set arrives as a real bool from most connectors, as a string from some."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "t", "yes", "1"}
-    return bool(value)
 
 
 def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
@@ -125,14 +119,20 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
             preceding = case_records[start_index - 1] if start_index > 0 else None
             closing_event = get(last, EVENT)
             closing_action = get(last, ACTION)
-            is_close = closing_action == CASE_CLOSED
+            # Either housekeeping clear ends a run on a closed case: 'Case Closed' at the
+            # close, or 'Automatically Cleared' by the nightly job afterwards.
+            is_close = is_housekeeping_clear(last)
 
             runs.append(
                 {
                     "case": case_id,
                     "case_number": get(run_records[0], "FLAGS__Case__r.CaseNumber"),
-                    "owner": get(run_records[0], "FLAGS__Owner__c"),
-                    "owner_name": get(run_records[0], "FLAGS__Owner_Name__c"),
+                    # The owner on the LAST record is who cleared it (or holds it now):
+                    # a flag raised under a queue and answered after assignment belongs
+                    # to the person who answered.
+                    "owner": get(last, "FLAGS__Owner__c"),
+                    "owner_name": get(last, "FLAGS__Owner_Name__c"),
+                    "opening_owner": get(run_records[0], "FLAGS__Owner__c"),
                     "start": get(run_records[0], START),
                     "end": get(last, END),
                     "intervals": len(run_records),
@@ -144,14 +144,12 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
                     # No preceding record has two causes: the case really was flagged at
                     # creation (history number 001), or the pull's window starts mid-case.
                     # Only the first is "at creation"; the second is truncated history.
-                    "flagged_at_creation": preceding is None and _is_first_record(run_records[0]),
-                    "truncated_start": preceding is None and not _is_first_record(run_records[0]),
+                    "flagged_at_creation": preceding is None and is_first_record(run_records[0]),
+                    "truncated_start": preceding is None and not is_first_record(run_records[0]),
                     "closing_event": closing_event,
                     "closing_action": closing_action,
-                    # A genuine clear is a human reply. The Flag Cleared + Case Closed
-                    # shape is close housekeeping and is excluded everywhere.
-                    # Excludes BOTH housekeeping shapes (Case Closed, Automatically
-                    # Cleared); see cfa_common.HOUSEKEEPING_CLEARS.
+                    # A genuine clear is a response; both housekeeping shapes (Case
+                    # Closed, Automatically Cleared) are excluded everywhere.
                     "genuine_clear": is_genuine_clear(last),
                     "housekeeping_close": is_close,
                     "closed_run": is_close,
@@ -160,17 +158,6 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
 
     runs.sort(key=lambda r: (str(r["case"]), str(r["start"])))
     return runs
-
-
-def _is_first_record(record: dict) -> bool:
-    """True when this is the case's first CFHT record (history number 001), or unknown."""
-    seq = get(record, "FLAGS__Case_Flag_History_Number__c") or get(record, "Name")
-    if seq is None:
-        return True  # field not selected: keep the old reading, but collect_warnings says so
-    try:
-        return int(str(seq).strip()) == 1
-    except ValueError:
-        return True
 
 
 def collect_warnings(runs: list[dict], records: list[dict]) -> list[str]:
@@ -230,14 +217,13 @@ def mode_ongoing(runs: list[dict]) -> dict:
         up_bh[run["case"]] += run["bh_total"]
         if run["genuine_clear"]:
             clears[run["case"]] += 1
-    per_case = clears
     case_means = [up_bh[c] / n for c, n in clears.items() if n]
 
     return {
         "mode": "ongoing",
         "runs_total": len(runs),
         "genuine_clear_runs": len(genuine),
-        "cases_with_genuine_clears": len(per_case),
+        "cases_with_genuine_clears": len(clears),
         "method_a_median_of_per_case_means": median(case_means),
         "method_a_detail": describe(case_means),
         "method_b_median_of_run_totals": median([r["bh_total"] for r in genuine]),
@@ -257,7 +243,8 @@ def _run_group(run: dict, group_by: str | None) -> str:
     return str(value or run.get("owner_name") or "(no owner)")
 
 
-def mode_followup_split(runs: list[dict], group_by: str | None, utc_offset: float = 0.0) -> dict:
+def mode_followup_split(runs: list[dict], group_by: str | None, utc_offset: float = 0.0,
+                        owners: frozenset = frozenset()) -> dict:
     """
     Bucket genuine clears by opening trigger, per group.
 
@@ -275,6 +262,10 @@ def mode_followup_split(runs: list[dict], group_by: str | None, utc_offset: floa
         # Only genuine clears count; checking first means a group with no genuine clears
         # never appears as an all-zero row.
         if not run["genuine_clear"]:
+            continue
+        # §8 pulls every record on the rep's cases, so clears by other owners are in the
+        # input: keep only the ones the named owner(s) gave.
+        if owners and run["owner"] not in owners and run["owner_name"] not in owners:
             continue
         key = _run_group(run, group_by)
         bucket = groups[key]
@@ -403,7 +394,8 @@ def mode_down_intervals(records: list[dict], resolved_statuses: frozenset = froz
       ended_in_close  the wait ends at a close (Action = 'Case Closed'): nobody replied,
                       the case closed. On the final close this is the post-resolution
                       dwell; on an earlier close it is still not a turnaround.
-      closed_gap      the wait starts right after a close: the case sat closed.
+      closed_gap      the wait starts right after a close or an Automatically Cleared
+                      clear: the case sat closed.
       truncated       the wait starts at the first record of the pull but not of the
                       case (history number > 1): the window cut it short.
     Kept waits are tagged by what ended them (Email Received vs Follow-Up Process...),
@@ -432,6 +424,10 @@ def mode_down_intervals(records: list[dict], resolved_statuses: frozenset = froz
                 # is closed-gap time, a different thing (seen in reopened cases).
                 if get(case_records[index - 1], ACTION) == CASE_CLOSED:
                     break
+                # A flag cleared by housekeeping: what follows is the case sitting closed.
+            if begin > 0 and is_housekeeping_clear(case_records[begin - 1]):
+                excluded["closed_gap"] += 1
+                continue
             wait = case_records[begin:index]
             before = case_records[begin - 1] if begin > 0 else None
 
@@ -442,7 +438,7 @@ def mode_down_intervals(records: list[dict], resolved_statuses: frozenset = froz
             elif resolved_statuses and all(
                     get(r, "FLAGS__Case_Status__c") in resolved_statuses for r in wait):
                 excluded["resolved_only"] += 1
-            elif before is None and not _is_first_record(wait[0]):
+            elif before is None and not is_first_record(wait[0]):
                 excluded["truncated"] += 1
             else:
                 waits.append({
@@ -497,6 +493,8 @@ def render(payload: dict) -> None:
             print(f"\nrun totals: p25 {fnum(detail['p25'])} | p75 {fnum(detail['p75'])} "
                   f"| p90 {fnum(detail['p90'])} | max {fnum(detail['max'])} "
                   f"| tail ratio {fnum(detail['tail_ratio'])}")
+            if detail.get("tail_note"):
+                print(detail["tail_note"])
 
     elif mode == "followup-split":
         rows = []
@@ -540,6 +538,8 @@ def render(payload: dict) -> None:
         print(f"n {stats.get('n')} | median {fnum(stats.get('median'))} BH "
               f"| mean {fnum(stats.get('mean'))} BH | worst gap "
               f"{fnum(payload.get('worst_gap_bh'))} BH")
+        if stats.get("tail_note"):
+            print(stats["tail_note"])
 
     else:
         rows = [[r.get("case_number") or r["case"], r["intervals"], fnum(r["bh_total"]),
@@ -564,6 +564,9 @@ def main() -> int:
     parser.add_argument("--resolved-statuses", default="",
                         help="down-intervals: comma list of statuses meaning resolved, waiting "
                              "to close; their time is dropped from customer waits")
+    parser.add_argument("--owners", default="",
+                        help="followup-split: comma list of owner Ids or names; keep only "
+                             "clears those owners gave (§8 pulls other owners' records too)")
     parser.add_argument("--utc-offset", type=float, default=0.0,
                         help="followup-split: the rep's UTC offset in hours (e.g. -5 for US "
                              "Eastern standard time) so batching days are local days")
@@ -578,6 +581,10 @@ def main() -> int:
 
         if args.mode == "down-intervals":
             resolved = frozenset(x.strip() for x in args.resolved_statuses.split(",") if x.strip())
+            if resolved:
+                # Without the status column the option would silently do nothing.
+                require_columns(records, ["FLAGS__Case_Status__c"],
+                                "run_stitch down-intervals --resolved-statuses")
             payload = mode_down_intervals(records, resolved)
             payload["warnings"] = []
         else:
@@ -588,7 +595,8 @@ def main() -> int:
             elif args.mode == "ongoing":
                 payload = mode_ongoing(runs)
             elif args.mode == "followup-split":
-                payload = mode_followup_split(runs, args.group_by, args.utc_offset)
+                owners = frozenset(x.strip() for x in args.owners.split(",") if x.strip())
+                payload = mode_followup_split(runs, args.group_by, args.utc_offset, owners)
             else:
                 payload = mode_worst_run(runs, args.stall_bar)
             payload["warnings"] = warnings

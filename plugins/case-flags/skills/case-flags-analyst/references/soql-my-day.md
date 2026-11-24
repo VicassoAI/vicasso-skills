@@ -44,8 +44,8 @@ ORDER BY Parent.FLAGS__CaseFlagsEscalationTime4__c ASC
 
 ### Ring 3 — Flagged cases in my queues (unassigned to a person)
 
-Queue membership can be direct, or through a **public group** or a **role** (verified live: one org had 6
-queue memberships held by groups and roles, not users). Resolve the user's groups first, then the queues.
+Queue membership can be direct, or through a **public group** or a **role** (verified: queue memberships held
+by groups and roles, not users, are common). Resolve the user's groups first, then the queues.
 All of these queries were verified live.
 
 **Ring 3, step 1: the user's role chain.** Start from the role Id (from the identity step, or

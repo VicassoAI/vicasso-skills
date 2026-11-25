@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// One version, declared in six manifests because each provider reads a different
-// one. Drift is silent until someone asks which version they are running.
+// Each plugin has one version, declared in three manifests because each provider
+// reads a different one. Drift is silent until someone asks which version they
+// are running. Plugins version independently: case-flags and simple-survey may
+// differ, but every manifest for the same plugin must agree.
 //
 // Usage: node scripts/validate-versions.mjs [--ahead-of-latest-tag]
 
@@ -75,7 +77,7 @@ if (process.argv.includes('--ahead-of-latest-tag')) {
 }
 
 const sources = []
-const declare = (label, rel, value, required) => sources.push({ label, rel, value, required })
+const declare = (plugin, label, rel, value, required) => sources.push({ plugin, label, rel, value, required })
 
 for (const plugin of dirs(join(ROOT, 'plugins'))) {
   for (const [provider, rel] of [
@@ -87,7 +89,7 @@ for (const plugin of dirs(join(ROOT, 'plugins'))) {
     if (manifest === null) {
       err(`${rel} is missing`)
     } else if (manifest) {
-      declare(`${plugin} (${provider})`, rel, manifest.version, true)
+      declare(plugin, `${plugin} (${provider})`, rel, manifest.version, true)
     }
   }
 }
@@ -103,7 +105,8 @@ for (const [label, rel] of [
   if (!catalog) continue
   for (const entry of catalog.plugins ?? []) {
     if (entry?.version !== undefined) {
-      declare(`${label} entry "${entry?.name ?? 'unnamed'}"`, rel, entry.version, false)
+      const name = entry?.name ?? 'unnamed'
+      declare(name, `${label} entry "${name}"`, rel, entry.version, false)
     }
   }
 }
@@ -121,18 +124,26 @@ for (const source of sources) {
 }
 
 const found = sources.filter((s) => typeof s.value === 'string' && s.value !== '')
-const distinct = [...new Set(found.map((s) => s.value))]
+const agreed = []
 
-if (distinct.length > 1) {
-  err(`${distinct.length} different versions declared across ${found.length} manifests: ${distinct.sort().join(', ')}`)
-  // Grouped so the odd one out is visible without diffing six files by hand.
-  for (const version of distinct.sort()) {
-    console.log(`  ${version}`)
-    for (const source of found.filter((s) => s.value === version)) {
-      console.log(`    ${source.label.padEnd(28)} ${source.rel}`)
+for (const plugin of [...new Set(found.map((s) => s.plugin))].sort()) {
+  const mine = found.filter((s) => s.plugin === plugin)
+  const distinct = [...new Set(mine.map((s) => s.value))].sort()
+
+  if (distinct.length > 1) {
+    err(`${plugin}: ${distinct.length} different versions declared across ${mine.length} manifests: ${distinct.join(', ')}`)
+    // Grouped so the odd one out is visible without diffing the files by hand.
+    console.log(`  ${plugin}`)
+    for (const version of distinct) {
+      console.log(`    ${version}`)
+      for (const source of mine.filter((s) => s.value === version)) {
+        console.log(`      ${source.label.padEnd(28)} ${source.rel}`)
+      }
     }
+    console.log('')
+  } else {
+    agreed.push(`${plugin} ${distinct[0]} agreed across ${mine.length} manifest(s).`)
   }
-  console.log('')
 }
 
 for (const e of errors) console.log(`  ERROR  ${e}`)
@@ -140,4 +151,4 @@ if (errors.length) {
   console.log(`\n${errors.length} error(s). Not ready to publish.`)
   process.exit(1)
 }
-console.log(`version ${distinct[0]} agreed across ${found.length} manifest(s).`)
+for (const line of agreed) console.log(line)

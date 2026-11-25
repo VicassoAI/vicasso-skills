@@ -24,7 +24,11 @@ Category criteria (`E2CP__Criteria__c`) are a JSON array of `{field, operator, v
 - Rank by how well the response's content fits what this reply needs to say. Break ties with the agent's bookmarks, then Usage Count.
 - Suggest a response only when it says what this reply needs to say. Small edits are fine (a name, a date, one case-specific sentence); one that would need rewriting doesn't qualify. Never suggest one just to fill an option.
 - When none qualifies, write fresh and say so in one line: "No Canned Response fits this reply." When the fresh reply looks routine, add one line: if the agent finds themselves writing this often, ask their manager to create a Canned Response for it.
-- **Intelligent Responses** (responses with Flow merge fields) can go out directly: Send Response runs their Flow when given the `cannedResponseId`.
+- **Intelligent Responses** (responses with Flow merge fields) need their Flow to run, which only happens inside Send Response with the `cannedResponseId`. The skill can't see the output before it goes out, so never send one directly:
+  - Save it as a draft with its `cannedResponseId`, read the draft's body, and run the audience gate and the unresolved-merge-field check on it. If either finds a problem, show it to the agent.
+  - The agent reviews and sends the draft from the New Comment Page.
+  - When a draft isn't possible (Draft Comments off, or the agent already has a draft on the case), suggest the response by name and let the agent insert it on the New Comment Page.
+  - Never send its text as `body` (to edit it or drop a default file): the Flow wouldn't run, and the raw Flow merge fields would go out.
 
 ### Merge fields
 
@@ -56,15 +60,15 @@ A Canned Response can carry default files: Files linked to the response record (
 - **Show them.** An option built on a response lists every file linked to it. When the body embeds images, say they will also go out as attachments, so the customer gets them twice (inline and attached).
 - **Unedited:** sending or drafting with `cannedResponseId` attaches every linked file. Nothing else to do.
 - **Edited or combined:** sending or drafting with `body` attaches nothing on its own. Pass the ContentDocument Ids of each used response's linked files in `fileAttachments`. They don't need to be on the case first. The agent can drop any file (an embedded image, for instance) at the final confirmation.
-- **Dropping a file from an unedited response:** `cannedResponseId` always attaches every linked file. If the agent wants one left off, send the response's text as `body` with the remaining files in `fileAttachments`, and treat it as edited for usage counting.
+- **Dropping a file from an unedited response:** `cannedResponseId` always attaches every linked file. If the agent wants one left off from an Intelligent Response, they do it on the New Comment Page. For any other response, send the response's text as `body` with the remaining files in `fileAttachments`, and treat it as edited for usage counting.
 - **Drafts:** a draft keeps its files and preselects them when the agent opens it, whether it was created with `cannedResponseId` or with `body` and `fileAttachments`. The exception is files already attached to the case, which load unselected (the New Comment Page does the same). Name those files so the agent can select them.
 
 ## Knowledge
 
 - Search Knowledge articles and pull the content the reply needs. Body fields vary by org; discover them before selecting (see `soql-gotchas.md`). When it's unclear which article fields to use, ask the agent.
 - Orgs without Knowledge are normal. Don't mention the absence.
-- After a reply uses an article, attach it to the case (`CaseArticle`). Send Response doesn't, and `{$KnowledgeLinks}` lists only attached articles.
-- Before using a Canned Response with `{$KnowledgeLinks}`, check the org has a knowledge base URL (`PKB_BASE_URL`, or the case's `Knowledge_Base_URL__c`). Without one the links start with the text "null": leave the response out and say why.
+- When a reply uses an article, attach it to the case (`CaseArticle`) before calling Send Response, whether sending or saving a draft. Send Response doesn't attach it, and `{$KnowledgeLinks}` expands at send time from the articles already attached.
+- Before using a Canned Response with `{$KnowledgeLinks}`, check the org has a knowledge base URL (`PKB_BASE_URL`, or the case's `E2CP__Knowledge_Base_URL__c`). Without one the links start with the text "null": leave the response out and say why.
 - `{$KnowledgeLinks}` lists only English, online articles attached to the case. Internal-only articles are skipped unless `PKB_ALL_LINKS` is on — and when it is, check the expanded links in the audience gate.
 
 ## Proposed Case Field Updates
@@ -88,7 +92,7 @@ Run these checks every time, in this order.
 2. **Comment Only Mode.** If `ENABLE_COMMENT_ONLY_MODE` applies to this case (including through a variation preset), post with `commentOnly = true` and send no email, as the New Comment Page would. Send Response doesn't check it.
 3. **Recipients.**
    - Public: Send Response emails only the case's default recipients (Case Contact or Lead, Additional To / CC / BCC, and Case Team Members when team members are enabled), and nobody when `EMAIL_NOTIFICATION` is off. With no recipients it only adds the comment: tell the agent, and offer a draft instead when Draft Comments are on.
-   - **Support addresses are never recipients.** Every inbound email lists the support address the customer wrote to (e.g. support@yourcompany.com). E2CP already threads the reply, and Send Response drops support addresses itself so E2CP never emails itself. Keep them out of the Additional fields anyway, so the recipients the agent confirms match who actually gets the email. An address is a support address when it matches an org-wide email address (`OrgWideEmailAddress.Address`), an active Email Services address (`EmailServicesAddress`, `LocalPart@EmailDomainName`), or an entry in E2CP's Inbound Email Addresses (`E2C_EMAIL_CASE_ORIGIN_ROUTING`) when settings are readable. Never propose adding one, and remove any found in the Additional To / CC / BCC fields before sending, with the agent's confirmation.
+   - **Support addresses are never recipients.** Every inbound email lists the support address the customer wrote to (e.g. support@yourcompany.com). E2CP already threads the reply, and Send Response drops support addresses itself so E2CP never emails itself. Keep them out of the Additional fields anyway, so the recipients the agent confirms match who actually gets the email. An address is a support address when it matches an org-wide email address (`OrgWideEmailAddress.Address`), an active Email Services address (`EmailServicesAddress`, `LocalPart@EmailDomainName`), or either address in an entry of E2CP's Inbound Email Addresses (`E2C_EMAIL_CASE_ORIGIN_ROUTING`; see `settings.md`) when settings are readable. Never propose adding one, and remove any found in the Additional To / CC / BCC fields before sending, with the agent's confirmation.
    - Adding someone: Send Response has no recipient parameter. With the agent's confirmation, update the Case's Additional To / CC / BCC fields (or add a Case Team Member) first, then send.
    - Private: only the private Additional To / CC / BCC addresses whose domain is in Internal Domains (`PRIVATE_COMMENT_DOMAINS`) are emailed; E2CP silently drops the rest. Check that Internal Domains is populated and that each intended recipient's domain is on it. When settings can't be read and the list isn't in memory yet, ask the user for it (see `settings.md`); don't assume it's empty. When the list is empty, nobody gets the email: tell the agent before posting. To add an internal person, use the private Additional fields.
 4. **Audience gate** (SKILL.md, "Audience"). Scan the final HTML. Stop on any internal link or record Id.
@@ -96,19 +100,23 @@ Run these checks every time, in this order.
 
 ## Sending
 
-1. Update the confirmed Case fields first (Send Response has no field-update parameter).
-2. Call Send Response without a `templateId`; E2CP picks the org's default public or private template.
+1. Record the current values of every Case field about to change, including Additional To / CC / BCC.
+2. Update the confirmed Case fields (Send Response has no field-update parameter).
+3. If a Knowledge article was used, attach it to the case, so `{$KnowledgeLinks}` includes it.
+4. Call Send Response without a `templateId`; E2CP picks the org's default public or private template.
    - Pass `body` (HTML as-is) or `cannedResponseId` — never both.
    - To send files, pass their ContentDocument Ids in `fileAttachments`: files already on the case, or a Canned Response's default files when its text was edited (see "Default files"). The skill doesn't upload new files.
-3. If a Knowledge article was used, attach it to the case.
-4. If an edited or combined Canned Response was used, update its usage fields.
+5. If an edited or combined Canned Response was used, update its usage fields.
+
+**If Send Response fails**, the Case fields have already changed and the org's automation has already run on them, but nothing was sent. Tell the agent right away: no email went out, which fields changed (old → new), and any automation that may have run. Offer to restore the recorded values; the agent confirms. Restoring doesn't undo what automation already did.
 
 ## Saving a Draft
 
-1. Call Send Response with `createDraft = true` and `body` or `cannedResponseId`. With `body` built on a Canned Response, also pass its default files in `fileAttachments` (see "Default files"). Never insert the draft record directly, even when Send Response is unavailable: a draft inserted by hand can miss what E2CP sets when it saves one, and its recipients may not load as the agent expects. Offer the text in chat instead.
-2. Send Response doesn't return the draft's Id. Query for it right after the call: this case, this agent as User, created since the call.
-3. **Check the draft's recipients.** Its To / CC / BCC fields hold semicolon-separated entries, each one `case_contact`, `case_lead`, a CaseTeamMember Id (`0B6…`), or a plain email address. Compare them with the recipients the agent confirmed. If anyone is missing, name them so the agent can add them on the New Comment Page; don't edit the draft's recipient fields.
-4. Write the confirmed field changes into the draft's `E2CP__Fields_Updated_1__c` (not the Case), so they load on the New Comment Page with the draft:
+1. If a Knowledge article was used, attach it to the case.
+2. Call Send Response with `createDraft = true` and `body` or `cannedResponseId`. With `body` built on a Canned Response, also pass its default files in `fileAttachments` (see "Default files"). Never insert the draft record directly, even when Send Response is unavailable: a draft inserted by hand can miss what E2CP sets when it saves one, and its recipients may not load as the agent expects. Offer the text in chat instead.
+3. Send Response doesn't return the draft's Id. Query for it right after the call: this case, this agent as User, created since the call.
+4. **Check the draft's recipients.** Its To / CC / BCC fields hold semicolon-separated entries, each one `case_contact`, `case_lead`, a CaseTeamMember Id (`0B6…`), or a plain email address. Compare them with the recipients the agent confirmed. If anyone is missing, name them so the agent can add them on the New Comment Page; don't edit the draft's recipient fields.
+5. Write the confirmed field changes into the draft's `E2CP__Fields_Updated_1__c` (not the Case), so they load on the New Comment Page with the draft:
 
    ```json
    {"case":{"Status":{"oldValue":"New","newValue":"Working"}}}
@@ -121,5 +129,6 @@ Run these checks every time, in this order.
    - `oldValue` equals the Case's current value. Read the Case right before writing, and use what it holds now.
 
    Field sets can't be read through the Salesforce MCP. When you aren't sure a field is on the page, or for a change to the Owner (it needs a format the skill doesn't build), leave it out and tell the agent to set it on the New Comment Page.
-5. If the draft carries files already attached to the case, name them: they load unselected.
-6. The agent edits and sends the draft from the New Comment Page.
+6. If an edited or combined Canned Response was used, update its usage fields (see "Counting a use").
+7. If the draft carries files already attached to the case, name them: they load unselected.
+8. The agent edits and sends the draft from the New Comment Page.

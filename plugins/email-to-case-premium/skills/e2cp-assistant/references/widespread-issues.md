@@ -22,7 +22,7 @@ When a case matches an active Widespread Issue, offer to attach it. When it matc
 
 Cluster detection reuses Case Companion's similar-case search; it doesn't run a search of its own.
 
-- A cluster must span several customers: distinct accounts, or distinct contacts in orgs that don't use accounts.
+- A cluster must span several customers: distinct accounts, or distinct contacts in orgs that don't use accounts. Contacts in the Default Account (`EXTERNAL_CONTACT_ACCOUNT`) each count as their own customer.
 - **Default threshold:** 3+ open cases from 3+ distinct customers within 7 days.
 - Scale it with the org's typical weekly case volume and customer count: a busy org needs a larger cluster, a quiet one a longer window.
 - High or Urgent priority lowers the bar to 2 customers.
@@ -31,7 +31,7 @@ Cluster detection reuses Case Companion's similar-case search; it doesn't run a 
 ## Reporting and Attaching
 
 1. Show the similar cases found and get the agent's confirmation before reporting a Widespread Issue or attaching any case.
-2. **Reporting a new one:** Title and Description drawn from the cases. Leave the owner to the configured Widespread Issue Owner.
-3. **Attaching:** create one `E2CP__Widespread_Issue_Report__c` record per case ([KBA](https://kb.vicasso.com/?kb=000005171)). Attach this case and every similar case the agent confirms.
+2. **Reporting a new one:** Title and Description drawn from the cases, written in customer-neutral terms: symptoms, product or feature, and impact. No customer, contact, or account names, no record Ids or org Ids, and no order numbers or other details from any one customer, since replies to other customers reuse the Description. Run the audience gate (SKILL.md) and the rule against other customers' information on both before reporting. Leave the owner to the configured Widespread Issue Owner.
+3. **Attaching:** create one `E2CP__Widespread_Issue_Report__c` record per case ([KBA](https://kb.vicasso.com/?kb=000005171)). Attach this case and every similar case the agent confirms. First query the issue's existing reports and skip any case already attached (a second report inflates the Affected Case Count); say which cases were skipped.
 
 Use the approval checklist (SKILL.md, "Inline Interfaces") when attaching several cases.

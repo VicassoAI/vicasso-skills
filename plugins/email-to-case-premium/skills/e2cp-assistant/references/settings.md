@@ -34,8 +34,8 @@ Field sets (including the New Comment Page field set) can't be read through the 
 | `USE_SIGNATURE` | Salesforce appends the agent's signature. On: don't write a signature block | Ask the user |
 | `PRIVATE_COMMENT_DOMAINS` (list) | Internal Domains: the only domains private replies are emailed to | No data signal. Before the first private reply that should email someone, ask the user for the list (an empty answer is valid) and save it. Don't assume it's empty |
 | `IGNORE_INTERNAL_SUBDOMAINS` | Lets subdomains of Internal Domains match | Ask the user |
-| `E2C_EMAIL_CASE_ORIGIN_ROUTING` | Inbound Email Addresses: the support addresses customers write to. Never recipients or contacts | Org-wide email addresses and active Email Services addresses cover most of them; no other data signal |
-| `PKB_BASE_URL` | Base URL for `{$KnowledgeLinks}` (or the case's `Knowledge_Base_URL__c`). Neither: links start with the text "null" | Ask the user |
+| `E2C_EMAIL_CASE_ORIGIN_ROUTING` (list) | Inbound Email Addresses: the support addresses customers write to. Never recipients or contacts. Each entry (category `e2c_email_case_origin_routing`) holds an address in Long Name, and a comma-separated Value that starts with an address (followed by routing details). The two addresses can differ; treat both as support addresses | Org-wide email addresses and active Email Services addresses cover most of them; no other data signal |
+| `PKB_BASE_URL` | Base URL for `{$KnowledgeLinks}` (or the case's `E2CP__Knowledge_Base_URL__c`). Neither: links start with the text "null" | Ask the user |
 | `PKB_ALL_LINKS` | Includes internal-only articles in `{$KnowledgeLinks}` | Ask the user |
 | `NEW_COMMENT_FIELDS` | The field set shown on the New Comment Page | See below |
 | `REFERENCE_TO_ORIGINAL_CASE` | Sets Parent Case on a follow-up created from a reply to a closed case | New cases whose Parent Case was already closed |

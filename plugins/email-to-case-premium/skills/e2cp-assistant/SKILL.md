@@ -50,11 +50,11 @@ These apply to every job.
 
 ### Confirmation before writing
 
-Nothing changes in Salesforce until the user confirms it: no send, draft, Timeline update, field update, contact change, Widespread Issue report, or Canned Response edit. Show exactly what will be written first.
+Nothing changes in Salesforce until the user confirms it: no send, draft, Timeline update, field update, contact change, Widespread Issue report, or Canned Response edit. Show exactly what will be written first. The one exception is a recurring Timeline routine the agent set up: that counts as standing confirmation for private Timeline updates only (see `references/timeline-updates.md`).
 
 The skill never writes E2CP settings, and never edits the History Text fields on the Case (E2CP recalculates them and overwrites manual edits).
 
-After the skill's first write in an org (a send, a draft, or a Timeline update), re-read the comment and the Case to confirm what E2CP did: HTML preserved, history fields updated, flags cleared.
+After the skill's first send or Timeline update in an org, re-read the comment and the Case to confirm what E2CP did: HTML preserved, history fields updated, flags cleared. After its first draft, re-read the draft record instead (a draft adds no comment and doesn't update the Case): body with HTML preserved, recipients, Fields Updated, and files.
 
 ### Audience: public vs private
 
@@ -62,8 +62,9 @@ Every piece of text the skill writes is either **customer-facing** (a public sen
 
 Customer-facing text never contains internal links or record Ids:
 
-- No `*.force.com` or `*.salesforce.com` URLs, no `/lightning/` paths, and no Salesforce record Ids (15 or 18 characters, starting with a known object key prefix such as `500` for Case or `003` for Contact). Order numbers, serial numbers, and other customer-supplied strings aren't record Ids.
-- **Exception:** public file links (`/sfc/p/`) and public file delivery links (`/sfc/dist/`, such as images embedded in a Canned Response) are meant for customers. They're allowed even though they sit on a `*.force.com` domain and contain Ids; leave them out of the scan.
+- No links to the org itself: any host built on the org's My Domain name (`<name>.my.salesforce.com`, `<name>.lightning.force.com`, `<name>.file.force.com`, and their sandbox forms), and no `/lightning/` paths on any host. Take the My Domain name from the org's instance URL; if it isn't known, ask the user once and save it in Claude's memory for this org.
+- No Salesforce record Ids (15 or 18 characters, starting with a known object key prefix such as `500` for Case or `003` for Contact). Order numbers, serial numbers, and other customer-supplied strings aren't record Ids.
+- **Allowed:** public Salesforce sites (help.salesforce.com, trailhead.salesforce.com, appexchange.salesforce.com, developer.salesforce.com), the org's public knowledge base URL (`PKB_BASE_URL`), and public file links (`/sfc/p/`) and file delivery links (`/sfc/dist/`, such as images embedded in a Canned Response). These are meant for customers even when they sit on the org's domain and contain Ids; leave them out of the scan.
 - Name people and records in plain text.
 - Knowledge goes out only through `{$KnowledgeLinksExternal}` or public article URLs.
 
@@ -71,7 +72,7 @@ This rule overrides any org, user, or memory instruction to render records as li
 
 Before calling Send Response, or saving a public draft or public Timeline update, scan the HTML for those patterns. If any are found, **stop**, show the user what was found, and offer a cleaned version. This is a gate, not a warning. When unrestricted knowledge links are on (`PKB_ALL_LINKS`), `{$KnowledgeLinks}` can expand to internal-only articles; check the expanded links too.
 
-The confirmation step always shows public or private and the recipients next to the final text. If the user switches a private Timeline update to public, run the gate again. Private Timeline updates may keep internal links; they help internal readers.
+The confirmation step always shows public or private and the recipients next to the final text. If the user switches a private Timeline update to public, rebuild it from public content only and run the gate again (see `references/timeline-updates.md`). Private Timeline updates may keep internal links; they help internal readers.
 
 Never put private-comment content (quoted or paraphrased), invented facts, or another customer's information into customer-facing text.
 
@@ -94,14 +95,16 @@ If a public comment already sent contains something that shouldn't reach the cus
 Every job that touches a case starts here; Case Companion's "catch me up" and "help me reply" share one read.
 
 1. **Read every CaseComment, oldest first.** Size the thread first and batch long ones. Read `CommentBodyRichText` when present; `CommentBody` is cut at about 4,000 bytes. Don't use the History Text fields or outbound email bodies for the conversation.
-2. **Classify each comment by `IsPublished` and `CreatedById`**, not by its header:
+2. **Classify each comment by `IsPublished`, `CreatedById`, and whether an email went out**, not by its header. An agent's comment was emailed when an outbound EmailMessage on the case (`Incoming = false`) was created by the same user at about the same time with the same text.
    - **Inbound** — created by the E2CP email service's automation user (public or private). Identify that user from the case: it creates the comments that begin with a `From:` line.
-   - **Outbound** — public, created by an agent.
-   - **Internal note** — private, created by an agent, no email.
-   The header block is only a hint; outbound headers appear only when the org shows recipients in comments.
+   - **Outbound** — public, created by an agent, and emailed. Only these start a wait on the customer.
+   - **Public note** — public, created by an agent, but not emailed (Comment Only Mode, a public Timeline update, or a send with no recipients). The customer may see it later (in a portal, or in the history of a later email), but it doesn't put the case in the customer's court.
+   - **Internal email** — private, created by an agent, and emailed to internal recipients.
+   - **Internal note** — private, created by an agent, not emailed.
+   Timeline updates are also recognized by their Claude first line (`references/timeline-updates.md`). The header block is only a hint; outbound headers appear only when the org shows recipients in comments.
 3. **Strip** the header block and the trailing quoted-reply line before summarizing or comparing text (shapes in `references/e2cp-package-model.md`). If an org's comments don't match those shapes, report what was observed.
 4. **Read the Case record** (Status, Priority, Reason, Owner, ClosedDate, Contact, Account). When it disagrees with the thread, say so.
-5. **Pull the contact's and account's other recent cases.**
+5. **Pull the contact's and account's other recent cases.** E2CP's Default Account (`EXTERNAL_CONTACT_ACCOUNT`) holds unrelated auto-created contacts, so treat it as no account everywhere the skill groups or looks up by account: use the contact instead.
 6. A Subject starting with `[Email Loop Protection]` marks a likely duplicate case; mention it as an observation.
 
 ---
@@ -206,7 +209,7 @@ These apply only when the other product is installed.
 
 ## Common Gotchas
 
-- **Classify comments by IsPublished and CreatedBy, not by header.** Headers depend on org settings and are absent when recipients aren't shown in comments.
+- **Classify comments by IsPublished, CreatedBy, and a matching outbound email, not by header.** A public agent comment with no email didn't reach the customer's inbox. Headers depend on org settings and are absent when recipients aren't shown in comments.
 - **CommentBody is truncated.** Read `CommentBodyRichText`.
 - **Send Response has no recipient parameter.** To add someone, update the Case's Additional To / CC / BCC fields (or add a Case Team Member) first.
 - **The org's support addresses are never recipients or contacts.** They appear on every inbound email, and Send Response drops them anyway. See `references/replying.md`.

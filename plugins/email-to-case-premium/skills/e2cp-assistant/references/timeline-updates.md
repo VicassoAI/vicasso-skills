@@ -13,6 +13,8 @@ The agent names the source; the skill defines the format, privacy, and when to a
 
 A recurring routine is a Claude scheduled task (a Claude feature, not a Salesforce Task) that calls this skill.
 
+Setting up a routine is the agent's standing confirmation for **private, comment-only** Timeline updates on the cases and sources they named, so each run adds them without asking. When setting it up, show the format and tell the agent what each update can set off (see "Side Effects"). A routine never makes a public update or any other write (a send, a draft, a field update): it lists those for the agent to confirm in a later session.
+
 ## What a Timeline Update Is
 
 A **comment-only Case Comment** (Send Response with `commentOnly = true`), never a Salesforce Note. It has no recipients.
@@ -30,7 +32,7 @@ A **comment-only Case Comment** (Send Response with `commentOnly = true`), never
 ## Privacy
 
 - **Private by default.** Private updates may keep internal links; they help internal readers.
-- A **public** update goes into the public History Text and Most Recent Public Comment, which email templates merge into the next message to the customer. If the agent switches an update to public, run the audience gate (SKILL.md) before adding it.
+- A **public** update goes into the public History Text and Most Recent Public Comment, which email templates merge into the next message to the customer. If the agent switches an update to public, don't reuse the private text: rebuild it from this case's public comments and Case fields only, leaving out private notes, child cases, other records, and connected systems. Then run the audience gate (SKILL.md) before adding it.
 
 ## When to Add One
 

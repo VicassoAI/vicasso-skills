@@ -7,7 +7,7 @@ Covers every person who has emailed into the case, not only the original sender.
 ## Finding Auto-Created Contacts
 
 - An auto-created contact has the Description "Automatically created by Email to Case Premium" and often sits in the Default Account (`EXTERNAL_CONTACT_ACCOUNT`).
-- E2CP also auto-creates contacts for colleagues on To/CC. **Flag those instead of enriching them.** A colleague is someone whose email domain matches the email domain of an active Salesforce user in the org. Free email providers (gmail.com, outlook.com, yahoo.com and the like) never mark someone as a colleague, even when a user has an address there.
+- E2CP also auto-creates contacts for colleagues on To/CC. **Flag those instead of enriching them.** A colleague is someone whose email domain matches the email domain of an active internal Salesforce user in the org (`UserType = 'Standard'`). Experience Cloud and portal users have customer domains, so they never count. Free email providers (gmail.com, outlook.com, yahoo.com and the like) never mark someone as a colleague, even when a user has an address there.
 - When the case has no Contact but an auto-created contact matches the sender's address ignoring case (a sender address with capital letters can leave the contact unlinked), offer to set it as the Case Contact.
 
 ## Sources, Best First

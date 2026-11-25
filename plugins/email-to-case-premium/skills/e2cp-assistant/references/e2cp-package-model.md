@@ -35,7 +35,7 @@ Some orgs add local fields and objects of their own; they aren't part of the pac
 
 - **Inbound** — created by the E2CP email service's automation user. A leading `From:` line, plus To/CC lines when the org shows recipients on inbound comments. A private inbound email creates a private comment, except the first comment on a new case, which is always public.
 - **Outbound** — created by the agent. A recipients header appears only when the org shows recipients in comments: `To:` / `CC:` lines (Lightning and Send Response) or `[Recipients: …]` (Visualforce page). BCC is never listed. With the setting off there is no header.
-- **Internal note** — `IsPublished = false`, created by an agent, no email. Tell these apart from outbound by CreatedBy and IsPublished, not by the header.
+- **Internal note** — `IsPublished = false`, created by an agent, no email. Tell these apart from outbound by CreatedBy, IsPublished, and a matching outbound EmailMessage, not by the header. Public agent comments can go out with no email (Comment Only Mode, Timeline updates), and private ones can be emailed to Internal Domains.
 
 Strip the header block and the trailing quoted-reply line (`On <date> <address> wrote…`) before summarizing or comparing text.
 

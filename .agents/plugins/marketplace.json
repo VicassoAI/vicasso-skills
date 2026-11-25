@@ -17,6 +17,18 @@
       "category": "Productivity"
     },
     {
+      "name": "email-to-case-premium",
+      "source": {
+        "source": "local",
+        "path": "./plugins/email-to-case-premium"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
       "name": "simple-survey",
       "source": {
         "source": "local",

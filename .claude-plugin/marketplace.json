@@ -15,6 +15,13 @@
       "category": "salesforce"
     },
     {
+      "name": "email-to-case-premium",
+      "source": "./plugins/email-to-case-premium",
+      "strict": true,
+      "description": "Skills for working with Vicasso Email to Case Premium in Salesforce.",
+      "category": "salesforce"
+    },
+    {
       "name": "simple-survey",
       "source": "./plugins/simple-survey",
       "strict": true,

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "email-to-case-premium",
+  "version": "0.1.0",
+  "displayName": "Email to Case Premium",
+  "description": "Skills for working with Email to Case Premium in Salesforce.",
+  "author": {
+    "name": "Vicasso",
+    "url": "https://vicasso.com"
+  },
+  "homepage": "https://vicasso.com/products/email-to-case-premium",
+  "repository": "https://github.com/VicassoAI/vicasso-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "vicasso",
+    "salesforce",
+    "service-cloud",
+    "email-to-case",
+    "email-to-case-premium"
+  ]
+}

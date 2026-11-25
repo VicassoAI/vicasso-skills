@@ -57,7 +57,7 @@ different aging speeds as if equivalent.
 | `FLAGS__Initial_Response_Hours__c` | Hours from opened → initial response |
 | `FLAGS__Initial_Response_Business_Hours__c` | Business hours from opened → initial response. **Source for the initial-response median** |
 | `FLAGS__Case_Flag_Age__c` / `FLAGS__Case_Flag_Business_Age__c` | Hours / business-hours the current flag has been active |
-| `FLAGS__Hours_Age_1__c`…`4__c`, `FLAGS__Business_Hours_Age_1__c`…`4__c` | Rollups of time spent in each band (from CFHT) |
+| `FLAGS__Hours_Age_1__c`…`4__c`, `FLAGS__Business_Hours_Age_1__c`…`4__c` | Rollups of time spent in each band (from CFHT). **Their sum = the case's total flag-up (our-court) time, and `_Age_4` = time past SLA.** Verified: closed cases match the CFHT flag-up `Business_Hours_Elapsed` sum to within 0.001 BH. The sum includes flag-up time after a final close, and the calendar `Hours_Age_*` versions are not SLA time (see the CFHT notes below). They stop at the last recorded change. CFHT never writes a running interval, so an open case's current stretch is in neither the rollups nor CFHT. This is what lets Job I give a no-CFHT read |
 | `FLAGS__Enable_Case_Flags__c` | In a selective-processing org, true = this case is managed by Case Flags |
 | `FLAGS__CaseFlagsBusinessHours__c` | Lookup → `FLAGS__CaseFlagsBusinessHours__c` wrapper |
 
@@ -92,9 +92,9 @@ window. Read in `Start` order, the records reconstruct the responsiveness timeli
 | `FLAGS__Flag_Set__c` | Was the flag UP during this interval. **true = the org's court (customer waiting on us); false = the customer's court (we're waiting on them).** |
 | `FLAGS__Flag_Level__c` / `FLAGS__Flag_Level_BH__c` | Flag level as text **L0–L4** ("useful for analytics"). Prefer the `_BH` variant (it equals the non-BH one when the org isn't using business hours). Lets you read the level directly instead of computing it from escalation times |
 | `FLAGS__Event__c` | Flag Set, Flag Cleared, Case Owner Changed, Case Status Changed. Describes the transition that ENDED this interval |
-| `FLAGS__Action__c` | What initiated it. Validated picklist + observed values: Local Automation, Case Created, Case Closed, Set Flag Button, Clear Flag Button, External/Internal Comment Added, Email Received, Email Sent, Customer Attachment Added, Task Completed, **Follow-Up Process**, **User Action or Non-Flags Automation**. (There is no "Automatically Cleared" value.) |
+| `FLAGS__Action__c` | What initiated it. Values: **Set Flag Button / Clear Flag Button** (a manual set or clear from the case component, page or list view: a product feature, e.g. recording a response made by phone; not a lesser response), **Case Created** ("Set flag on case creation"), **Case Closed** ("Clear flag on case close"), **Email Received / Email Sent** (inbound/outbound email settings), **External Comment Added / Internal Comment Added** (community comment settings), **Customer Attachment Added**, **Task Completed**, **Chatter Post Sent / Chatter Post Received**, **Automatically Cleared** (the nightly "Automatically Clear Flags on Closed Cases" setting, off by default), **Follow-Up Process**, and **Local Automation** ("an action outside of the Case Flags package", e.g. workflow, Apex, Flow or a user action). Which values appear depends on which event rules an org has turned on. "User Action or Non-Flags Automation" has been seen in some data but isn't one of the documented values. |
 | `FLAGS__Reason__c` | Free-text reason the flag was set or cleared (when populated) |
-| `FLAGS__Owner__c` / `FLAGS__Owner_Name__c` | Case owner during the interval (a queue if queue-owned) |
+| `FLAGS__Owner__c` / `FLAGS__Owner_Name__c` | Case owner during the interval. **When a queue holds the case, `Owner__c` is null** and the queue's name is in `Owner_Name__c` (with the Id in `Queue_Id__c`). Verified. So `Owner__c != null` means a person owned it, and grouping by `Owner_Name__c` mixes queues in with people |
 | `FLAGS__Owner_Is_Active__c` | Whether that owner is still an active user (useful when summarizing past work) |
 | `FLAGS__Owner_License_Type__c` | The interval owner's Salesforce license type (e.g. `Standard`). Packaged and portable. *Some* packaged reports (e.g. Average Time to Respond by Owner) filter to `= 'Standard'` to limit to full-license internal users; others (e.g. Average Time to Respond in Queue) do not — see Job G |
 | `FLAGS__Queue_Id__c` | Queue Id if queue-owned during the interval |
@@ -120,16 +120,37 @@ time is always zero" — rather than a missing column. This happened once during
 treat a uniform, no-variance result across an entire population as a signal to check the field list
 before trusting it.
 
-**Close events come in two shapes (verified live).** The record that ends at a case close always has
+**Post-resolution time, defined once.** The flag-down stretch (all contiguous flag-down records) that ends in a case's **final** close
+(`Action = 'Case Closed'`, `Flag_Set = false`) is the resolved-but-not-closed dwell. Earlier closes on a
+reopened case end customer-court stretches, and the time after them, until the flag next goes up, is
+closed-gap time. Jobs D, H and I all use this definition: exclude post-resolution and closed-gap time
+from customer turnaround (Job H) and from customer-court totals (Job D vitals); Job I reports both
+separately.
+
+Two measures that look alike but answer different questions:
+- **Job I / Job D customer-court time and waits** count every customer-court stretch, including one
+  that ended at an earlier close on a reopened case. That time was spent waiting on the customer.
+- **Job H turnaround** (`run_stitch.py --mode down-intervals`) leaves out any wait that ended in a
+  close, because nobody replied and so it isn't a turnaround.
+
+Both take `--resolved-statuses`. Don't compare one with the other directly.
+
+**Close events come in two shapes (verified).** The record that ends at a case close always has
 `FLAGS__Action__c = 'Case Closed'`, but its `Event` depends on the flag state at close time:
 `Event = 'Flag Cleared'` if the case closed while flagged (the housekeeping clear), or
 `Event = 'Case Status Changed'` if the case closed while the flag was already down. In one real org over
 90 days the split was roughly 64% / 36% — filtering on `Event = 'Flag Cleared'` alone misses a third of
-closes. **The close-event test is `Action = 'Case Closed'`, regardless of Event.**
+closes. **The close-event test is `Action = 'Case Closed'`, regardless of Event.** That Action belongs to the
+"Clear flag on case close" setting. An org with that setting off may log no `Case Closed` Action, so
+`scripts/age_decompose.py` falls back to the case's `ClosedDate` and the org's closed statuses
+(`--closed-statuses`) when a case has none, and warns. Recurrence counts and Job H's close tests have no
+such fallback: in an org without the setting, say they may undercount closes.
 
-**Data hygiene for responsiveness:** the housekeeping clear is the `Event = 'Flag Cleared'` +
-`Action = 'Case Closed'` shape (a flag cleared because the case closed, not a human reply) — exclude
-those from response-time analysis. Also be aware that excluded/integration users may appear as the actor.
+**Data hygiene for responsiveness:** housekeeping clears are `Event = 'Flag Cleared'` with
+`Action = 'Case Closed'` (cleared because the case closed) **or** `Action = 'Automatically Cleared'`
+(cleared by the nightly closed-case job). Neither is a response; exclude both from response-time
+analysis (`FLAGS__Action__c NOT IN ('Case Closed','Automatically Cleared')`; in code,
+`cfa_common.is_genuine_clear`). Also be aware that excluded/integration users may appear as the actor.
 
 **Recurrence (reopening after close):** a case can carry more than one close event
 (`Action = 'Case Closed'`, either Event shape above) if it was closed, reopened, and closed again. This
@@ -147,7 +168,7 @@ this to split all genuine clears into follow-up-triggered vs. other. One caveat 
 recurrence case: a run with no preceding record at all (the case was flagged at creation) has no opening
 trigger to read — exclude those runs from this classification rather than guessing. Also note: the run's
 BH-elapsed does **not** reliably differ between follow-up-triggered and other-triggered genuine clears
-(tested live — medians 23 vs 15 min, means ~41 vs ~41 min) — it measures queue/wait time, not rep labor,
+(tested on production data: no consistent difference) — it measures queue/wait time, not rep labor,
 so don't use it as a proxy for effort here; see `references/followup-time-investment.md` for how labor time is
 handled instead (declared, not derived).
 
@@ -179,15 +200,55 @@ event (a status change, an owner change) splits the cycle across records, leavin
 tiny tail. The real response time for a cycle is therefore the **contiguous run of `Flag_Set = true`
 records** from the set that opened it through the clear that closed it. Two methods:
 - **(a) Aggregate approximation (default — scales to any volume):** two small GROUP BY queries — per-case
-  flag-up `SUM(Business_Hours_Elapsed)` and per-case genuine-clear `COUNT` (clears where Action is not
-  `Case Closed`). Per-case mean cycle time = sum ÷ clears (skip cases with 0 genuine clears); the estimate
-  is the **median of the per-case means**. Verified live to reconcile exactly with raw-run sums. SOQL has
+  flag-up `SUM(Business_Hours_Elapsed)` and per-case genuine-clear `COUNT` (clears where Action is neither
+  `Case Closed` nor `Automatically Cleared`). Per-case mean cycle time = sum ÷ clears (skip cases with 0 genuine clears); the estimate
+  is the **median of the per-case means**. Verified to reconcile exactly with raw-run sums. SOQL has
   no CASE expression, so this two-query shape is required — a single `SUM(CASE WHEN …)` query is invalid.
 - **(b) Raw runs (precise):** pull the raw `Flag_Set = true` records in Start order, sum each contiguous
   run ending in a genuine clear, take the median of the run totals. More precise but heavy — an active
   agent can have 1,000+ flag-up intervals in 90 days — so reserve it for small volumes or when the person
   asks for precision.
-Genuine clears exclude the `Flag Cleared` + `Case Closed` housekeeping rows.
+Genuine clears exclude the housekeeping clears (`Case Closed`, `Automatically Cleared`).
+
+**Holidays are honored, per calendar, per interval.** CFHT `FLAGS__Business_Hours_Elapsed__c` follows
+the `BusinessHours` calendar of the aging speed stamped on **that interval** (`FLAGS__Aging_Speed__c` on
+the CFHT record), including that calendar's own holiday list. Verified on production data by recomputing it
+independently across several calendars, weekends, short days and holidays:
+- **Cases on one aging speed matched to within 0.01 BH.** Each holiday removed exactly one working
+  day's hours on that calendar.
+- **Cases that changed aging speed** matched interval by interval, each on its own interval's calendar.
+- **Holidays apply only where attached.** A calendar without the holiday attached counted it as a
+  working day.
+
+`Case.FLAGS__Aging_Speed__c` holds only the **latest** speed.
+
+**Calendar band fields are not SLA time.** `FLAGS__Hours_in_Age_1..4__c` (CFHT) and
+`FLAGS__Hours_Age_1..4__c` (Case) apply the band thresholds in calendar hours. On business-hours speeds
+they diverge sharply from the BH bands (a case can show many calendar hours in "L4" against 0 BH). Use the
+BH band fields for any SLA statement.
+
+**History can continue after `ClosedDate`.** A closed case that receives an email, or that sits in a
+status the org defines as closed, keeps writing CFHT records without a new close event. Two of the 30
+cases above did this. Salesforce's Age stops at `ClosedDate`; the Case BH rollups include the later
+flag-up time. The **calendar total** of `FLAGS__Hours_Elapsed__c`
+across a case's records reconciles to the standard Age span (created → closed) whenever CFHT starts at
+case creation and nothing happened after the close. Verified on 30 of 30 cases once after-close
+time is subtracted.
+
+---
+
+## Standard Salesforce age and history (for comparison only — Job I)
+
+These are standard features, not Case Flags fields. They appear here so the skill never misstates what
+it is comparing against. Sources: Salesforce Help *Fields Available for Case Reports*, and KB 000387290,
+000382808 and 000388264.
+
+| Item | Behaviour |
+|---|---|
+| Report **Age** | Open: created → now; closed: created → closed. Shown in days, hours or minutes. **Ignores holidays.** Report-only, not a real field |
+| **Business Hours Age** | Must be **activated by Salesforce Support**; unavailable when default business hours are 24/7. Standard Case report types only (not custom report types). **Can't be filtered or bucketed.** Hidden from users without access to Closed Date/Time. Its "days" = **BH ÷ 24** (126 BH shows as 5.25 days). Ignores holidays |
+| Case History report "Business Hours" / "Business Hours Since Similar Change" | BH since the last update, or since the same field last changed; ignores holidays |
+| `CaseHistory` object | `CaseId`, `Field`, `OldValue`, `NewValue`, `CreatedDate`. Status rows exist only when field history tracking is on for Case.Status. Calendar time only, no court |
 
 ## Metrics Extension (`FLAGS_METRICS__`, optional package)
 

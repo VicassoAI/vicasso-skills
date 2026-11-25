@@ -45,7 +45,10 @@ stop and debug, not report with a caveat.
 Shared helpers, not run directly. `require_columns()` is the silent-zero guard;
 `check_variance()` catches the uniform-population signal; `median`/`percentile`/`describe`
 back every statistic; `weekday_occurrences()` handles the forecast denominator;
-`parse_dt()` copes with Salesforce's `+0000` offsets.
+`parse_dt()` copes with Salesforce's `+0000` offsets. The CFHT Action vocabulary lives here
+once (`HOUSEKEEPING_CLEARS`, `CUSTOMER_SET_ACTIONS`, `REPLY_CLEAR_ACTIONS`,
+`MANUAL_CLEAR_ACTION`, `ORG_AUTOMATION_ACTION`) with `is_genuine_clear()`, so every script
+agrees on what a response is.
 
 ### `cfht_merge.py` — paginated pulls
 Merges pages, dedupes by `Id`, reconciles against a `COUNT(Id)`, validates required columns,
@@ -69,11 +72,16 @@ describe separately. Modes:
 | `ongoing` | field-ref (a)+(b), H §10.3 | both documented methods side by side |
 | `followup-split` | followup-time-investment, C/E | follow-up vs other genuine clears + batching gap |
 | `worst-run` | H §10.6/§10.9 | longest continuous wait, concentration, stall vs volume |
-| `down-intervals` | H customer turnaround | flag-down stats, post-resolution dwell excluded |
+| `down-intervals` | H customer turnaround | per-wait flag-down stats; waits ending in a close, closed-gap and window-cut waits excluded |
 
 Runs beginning at a case's first record are flagged `flagged_at_creation` and excluded from
-the follow-up split rather than guessed at. Genuine clears exclude the
-`Flag Cleared` + `Case Closed` housekeeping shape. `--stall-bar` takes the org's ET3 offset
+the follow-up split rather than guessed at. Each run belongs to the owner on its last record
+(who cleared it); `--owners` keeps only clears by the named owner Ids or names, since §8
+pulls every record on the rep's cases. Options that read a column (`--resolved-statuses`
+needs `FLAGS__Case_Status__c`) fail with exit `2` when it isn't selected, rather than
+silently doing nothing. Genuine clears exclude the
+housekeeping clears (`Flag Cleared` with Action `Case Closed` or `Automatically Cleared`), via
+`cfa_common.is_genuine_clear`. `--stall-bar` takes the org's ET3 offset
 from Preflight — it is never hardcoded.
 
 ### `assignment_split.py` — Job F
@@ -111,6 +119,67 @@ below `--min-n`. `labor-per-clear` mode turns §5/§7.4 daily-clear-count rows i
 Mean sits beside median everywhere on purpose: the ratio is the tail signal Job H thresholds
 at 1.5×, and a clean median resting on one catastrophic case is the most misleading read
 available.
+
+### `age_decompose.py` — Job I True Case Age
+Assigns every CFHT interval to exactly one bucket: our court (with queue and past-SLA
+sub-totals), customer court, post-resolution (the flag-down stretch ending in the
+**final** close), closed gap (closed, then reopened), or after close (work done while
+the case stayed closed, which falls outside Salesforce's Age). It warns on after-close
+activity and on cases whose aging speed changed mid-life (their BH mixes calendars).
+Past SLA uses BH bands only; the calendar band fields apply thresholds in calendar
+hours and are not SLA time. Modes:
+
+| Mode | Input | Returns |
+|---|---|---|
+| `case` | `--cfht`, optional `--cases` | per-case buckets beside Salesforce's Age |
+| `cohort` | `--cfht --cases [--group-by Priority]` | bucket shares, controllable-BH distribution, SLA exposure, handoffs, calendar-per-BH |
+| `status` | `--cfht --customer-statuses "With Customer"` | BH per status split by court; flag-up time in waiting-on-customer statuses |
+| `backlog` | `--cases` only (§11.1) | open cases by age bucket: flagged / follow-up set / forgotten |
+
+Enforced: BH, calendar hours and `End` must be present (silent-zero guard, exit `2`); a
+negative elapsed value fails the run (exit `3`). Warned, not fatal: CFHT starting after
+`Case.CreatedDate` (partial history), and our-court BH disagreeing with the Case's
+`Business_Hours_Age_1..4` rollup by more than 0.05 BH. The rollup comparison is an
+independent cross-check, not an identity. CFHT never writes a running interval, so for
+open cases the time since the last change is reported separately (calendar hours, plus
+the court from `Case.FLAGS__ViewedFlag__c`) and never folded into BH. Pass `--cases` with
+`IsClosed`; without it, a case with activity after its last close stops the run (exit 2),
+because only `IsClosed` tells a reopened case from one worked while closed. `--bh-per-day` adds a working-days column; the
+script never divides BH by 24. `--resolved-statuses` (comma list, e.g. `"Pending Closure"`)
+moves flag-down time in those statuses into post-resolution. `--closed-statuses` names the
+org's closed statuses so a case with no `Case Closed` Action (the "Clear flag on case close"
+setting off) can fall back to the status transition or the record ending closest to
+`ClosedDate` (one close per close instant); the case gets `close_fallback` and a warning. It
+requires `--cases`. `--group-by`, `--followup-field` and the status options likewise
+require their columns. Each case also carries, built in the bucket pass so their
+totals equal the buckets:
+
+- `waits_on_us`: n, total/avg/max BH, `cleared`, `by_reply`, `by_manual_clear`,
+  `by_other_clear`, `max_level` (from the case's `CaseTimeOffset2..4`, passed in `--cases`);
+- `waits_on_customer`: n, total/avg/max BH, `ended_by_customer`, `ended_by_followup`,
+  `ended_by_org_automation`;
+- `rep_logged` (genuine clear within 60 s of `CreatedDate`; never on partial history);
+- `customer_contacts`: n, `while_open`, `while_resolved`, `while_closed` (each closed-case
+  contact with `at`, `reply_wait_bh`, `level_reached`);
+- `resolved_reverted_on_reply` (needs `--resolved-statuses`);
+- `inactive_owners` (from `FLAGS__Owner_Is_Active__c`).
+
+Case mode prints the waits as a second table and a "Signals" table; cohort mode gives
+per-case medians plus rep-logged and contact-while-closed counts.
+
+```bash
+python3 age_decompose.py --cfht <cache>/cohort.json --cases cases.json \
+    --mode cohort --group-by Priority --bh-per-day 10
+```
+
+## Tests
+
+`tests/` holds synthetic-record regression tests for edge cases found in review (no org
+data). Run them from this directory:
+
+```bash
+python3 -m unittest discover -s tests
+```
 
 ## Not scripted, deliberately
 

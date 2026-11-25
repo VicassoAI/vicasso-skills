@@ -30,6 +30,57 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Sequence
 
+# CFHT Action values (see references/field-reference.md, FLAGS__Action__c).
+# Housekeeping clears are not responses: 'Case Closed' (the "Clear flag on case close"
+# setting) and 'Automatically Cleared' (the nightly "Automatically Clear Flags on Closed
+# Cases" setting, off by default). Every genuine-clear test must exclude both.
+HOUSEKEEPING_CLEARS = frozenset({"Case Closed", "Automatically Cleared"})
+# Flag sets caused by the customer (inbound email, community comment or file, Chatter).
+CUSTOMER_SET_ACTIONS = frozenset({"Email Received", "External Comment Added",
+                                  "Customer Attachment Added", "Chatter Post Received"})
+# Clears that send something to the customer.
+REPLY_CLEAR_ACTIONS = frozenset({"Email Sent", "Internal Comment Added", "Chatter Post Sent"})
+# A manual clear from the component, page or list view: a product feature for recording a
+# response made another way (for example by phone). Not a lesser response.
+MANUAL_CLEAR_ACTION = "Clear Flag Button"
+# "An action outside of the Case Flags package" (workflow, Apex, Flow, or a user action).
+ORG_AUTOMATION_ACTION = "Local Automation"
+
+
+def truthy(value) -> bool:
+    """Flag_Set and other booleans arrive as real bools from most connectors, strings from some."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "t", "yes", "1"}
+    return bool(value)
+
+
+def is_first_record(record: dict, unknown: bool = True) -> bool:
+    """True when this is the case's first CFHT record (history number 1).
+
+    `unknown` is returned when the history number wasn't selected or can't be read.
+    """
+    seq = get(record, "FLAGS__Case_Flag_History_Number__c") or get(record, "Name")
+    if seq is None:
+        return unknown
+    try:
+        return int(str(seq).strip()) == 1
+    except ValueError:
+        return unknown
+
+
+def is_housekeeping_clear(record: dict) -> bool:
+    """A record whose Action is a close-housekeeping clear (Case Closed, Automatically Cleared)."""
+    return get(record, "FLAGS__Action__c") in HOUSEKEEPING_CLEARS
+
+
+def is_genuine_clear(record: dict) -> bool:
+    """A flag clear that represents a response, not close housekeeping."""
+    return (get(record, "FLAGS__Event__c") == "Flag Cleared"
+            and get(record, "FLAGS__Action__c") not in HOUSEKEEPING_CLEARS)
+
+
 # Business hours in a nominal working day. Single source; see SKILL.md "Tunable constants".
 WORKDAY_HOURS = 8.0
 
@@ -169,14 +220,25 @@ def require_columns(records: Sequence[dict], columns: Iterable[str], context: st
         return
 
     columns = list(columns)
-    present: set[str] = set()
-    for record in records[: min(len(records), 200)]:
-        present.update(record.keys())
-        for key, value in record.items():
-            if isinstance(value, dict):
-                present.update(f"{key}.{sub}" for sub in value)
 
-    missing = [c for c in columns if c not in present]
+    def has(record: dict, column: str) -> bool:
+        if column in record:
+            return True
+        parent, _, child = column.partition(".")
+        if not child or parent not in record:
+            return False
+        value = record[parent]
+        # A null relationship (e.g. "Account": null on a case with no account) was
+        # selected; its child fields are simply null, not missing.
+        return value is None or (isinstance(value, dict) and has(value, child))
+
+    # Every record, not "any of the first 200": merged pages can come from different
+    # SELECT lists, and a later page missing the column is exactly the silent-zero case.
+    # Salesforce returns selected-but-null fields as explicit nulls (checked on the MCP
+    # connector's output too), so a missing KEY means the column was not selected.
+    missing: list[str] = []
+    for record in records:
+        missing.extend(c for c in columns if c not in missing and not has(record, c))
     if missing:
         where = f" ({context})" if context else ""
         raise DataError(
@@ -283,6 +345,13 @@ def describe(values: Sequence[float], min_n: int | None = None) -> dict:
         "p90": percentile(clean, 90),
         "tail_ratio": (avg / med) if med else None,
     }
+    if not med and avg:
+        # mean/median is undefined at a zero median, but a positive mean over a zero
+        # median is the strongest tail there is -- don't let the signal vanish.
+        summary["tail_note"] = (
+            f"median is 0 but mean is {avg:.2f}: a few large values carry the whole total "
+            "(treat as a tail, >= the 1.5x bar)"
+        )
     if min_n is not None and len(clean) < min_n:
         summary["low_confidence"] = (
             f"only {len(clean)} values (threshold {min_n}) -- present as low-confidence"
@@ -318,6 +387,20 @@ def parse_dt(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def cfht_sort_key(record: dict, start_field: str = "FLAGS__Start__c"):
+    """
+    Order CFHT records within a case: Start, then the per-case history number.
+
+    Records can share a Start to the second (a zero-length interval written in the same
+    transaction as the next one -- seen live). Sorting on Start alone leaves their order
+    to the input, and §9.2's DESC tail page reverses it. The history number
+    (FLAGS__Case_Flag_History_Number__c, mirrored in Name) breaks the tie in write order.
+    """
+    start = parse_dt(get(record, start_field)) or parse_dt("1900-01-01")
+    seq = get(record, "FLAGS__Case_Flag_History_Number__c") or get(record, "Name") or ""
+    return (start, str(seq).zfill(10))
 
 
 def shift(dt: datetime, offset_hours: float) -> datetime:

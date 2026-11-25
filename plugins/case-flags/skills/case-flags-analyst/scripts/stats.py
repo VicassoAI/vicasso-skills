@@ -46,6 +46,14 @@ from cfa_common import (
 )
 
 
+def _group_key(record: dict, group_by: str | None) -> str:
+    """A selected-but-null group field becomes '(none)', never the string 'None'."""
+    if not group_by:
+        return "all"
+    value = get(record, group_by)
+    return "(none)" if value in (None, "") else str(value)
+
+
 def mode_describe(records, field, group_by, min_n) -> dict:
     require_columns(records, [field], f"stats --field {field}")
     if group_by:
@@ -53,7 +61,7 @@ def mode_describe(records, field, group_by, min_n) -> dict:
 
     groups: dict[str, list[float]] = defaultdict(list)
     for record in records:
-        key = str(get(record, group_by, "(none)")) if group_by else "all"
+        key = _group_key(record, group_by)
         value = to_float(get(record, field))
         if value is not None:
             groups[key].append(value)
@@ -108,7 +116,7 @@ def mode_labor_per_clear(records, group_by, min_n) -> dict:
 
     groups: dict[str, list[float]] = defaultdict(list)
     for record in records:
-        key = str(get(record, group_by, "all")) if group_by else "all"
+        key = _group_key(record, group_by)
         value = to_float(get(record, count_field))
         if value is not None:
             groups[key].append(value)
@@ -170,14 +178,19 @@ def render(payload: dict) -> None:
         rows.append([
             key, stats["n"], fnum(stats["median"]), fnum(stats["mean"]),
             fnum(stats["p75"]), fnum(stats["p90"]), fnum(stats["max"]),
-            fnum(stats["tail_ratio"], 1) + ("  tail" if (stats["tail_ratio"] or 0) >= 1.5 else ""),
+            (fnum(stats["tail_ratio"], 1) if stats["tail_ratio"] is not None else "0 median")
+            + ("  tail" if _is_tail(stats) else ""),
             "low-conf" if "low_confidence" in stats else "",
         ])
     print(table(rows, ["Group", "n", "Median", "Mean", "p75", "p90", "Max",
                        "Mean/median", "Note"]))
-    if any((s.get("tail_ratio") or 0) >= 1.5 for s in payload["groups"].values()):
+    if any(_is_tail(s) for s in payload["groups"].values()):
         print("\nA mean/median ratio at or above 1.5 means a tail exists -- an outlier is "
               "present even where the median looks clean. Report both figures.")
+
+
+def _is_tail(stats: dict) -> bool:
+    return (stats.get("tail_ratio") or 0) >= 1.5 or "tail_note" in stats
 
 
 def main() -> int:

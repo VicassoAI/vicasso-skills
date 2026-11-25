@@ -25,7 +25,7 @@ than `Local Automation` alone.
   band (`FLAGS__CaseTimeOffset_n__c` to `_n+1__c`) — i.e., it sat past where the org's own SLA said it
   should move to the next level. For a flag-down interval, compare against the flag-down long-gap bar in
   the SKILL.md **Tunable constants** block.
-- **(D) Breach** — the interval in which the case crossed into L4 (`Flag_Level = 'L4'` first appearing, or
+- **(D) Breach** — the interval in which the case crossed into L4 (`Flag_Level_BH = 'L4'` first appearing, or
   wall-clock passed `CaseFlagsEscalationTime4` while still flagged)
 - **(E) Follow-up reflag** — `Action = 'Follow-Up Process'`
 - **(F) Org-custom tracked field** — see "Detecting custom tracking" below
@@ -34,20 +34,58 @@ than `Local Automation` alone.
   `references/soql-timeline.md` §6.
   Report which trigger path each reopening took (customer activity vs. Follow-Up Process pulling it back);
   do not editorialize about what it implies.
+- **(H) Contact on a closed case** — a `Flag Set` with a customer Action (Email Received, External Comment
+  Added, Customer Attachment Added, Chatter Post Received) while the case is closed. The product raises
+  the flag by design. Report when it came, the time to the next genuine clear, and the level reached
+  (the script's `customer_contacts.while_closed`). It is not a reopen unless the status reopened.
+- **(I) Resolved status reverted on reply** — a resolved status changed to a non-resolved one within a
+  minute of a genuine clear, with no customer contact since it was set. Case Flags never changes Status,
+  so this is the org's own automation; attribute it that way. Only tag it when the person has named the
+  resolved statuses.
 
-**Step 3 — build the vitals block** (same shape every time, regardless of lens): case number/subject,
-current status, opened date, closed date if applicable, total age; initial response time
-(`Initial_Response_Business_Hours__c`); count of response cycles and total time-with-company (sum of
-flag-up `Business_Hours_Elapsed__c`, excluding the `Flag Cleared`+`Case Closed` housekeeping interval);
-total time-with-customer (sum of flag-down elapsed); handoff count; status-change count (if tracked);
-breach count (how many times it reached L4); follow-up-reflag count; **recurrence count** (number of
+Place each customer contact relative to the case's state (open, in a resolved status, or closed) and
+say it neutrally: "the customer wrote while the case sat in Pending Closure" is an observation, not a
+finding.
+
+**Timestamps** are in the user's timezone, with daylight saving applied per date (a timeline crossing a
+DST change shifts by an hour). **Level crossings** come from the case's own thresholds: a flag-up
+stretch crosses L*n* at its start plus `FLAGS__CaseTimeOffset<n>__c` business hours, so say when it
+reached L3, not only that it did. **Working days** use the case's own business-hours calendar; if the
+aging speed changed mid-case, say so, since the hours before and after the change use different
+calendars.
+
+**Step 3 — build the vitals block** (same shape every time, regardless of lens). It always includes the
+case's **True Case Age**: run `scripts/age_decompose.py --mode case` on the §6 pull plus the Case row
+(see `references/job-i-true-case-age.md`), so a reviewer sees why the case is as old as it is, not just
+how old. The block has:
+- **Identity and age:** case number/subject, current status, opened date, closed date if applicable, and
+  Salesforce's Age.
+- **True Case Age:** the BH within Age split into waiting on us, waiting on the customer, resolved
+  waiting to close, and (when non-zero) closed-gap, after-close and queue time. Give working days where
+  the calendar is known.
+- **Waits:** how many times the customer waited on us, labelled by how each ended (reply, manual clear,
+  other) with the average, the longest and the highest level reached; and how many times we waited on
+  the customer, labelled by how each ended (customer, Follow-Up Process, org automation) with the average
+  and the longest. A manual clear is the Clear Flag button, a product feature for a response made
+  another way; describe it neutrally. An org-automation-ended wait is a process outside Case Flags
+  raising the flag (e.g. on assignment), not the customer.
+- **Responsiveness:** initial response time (`Initial_Response_Business_Hours__c`). If the script says
+  **rep-logged** (cleared within a minute of creation), say "logged by us" instead of quoting a response
+  time.
+- **People:** name any owner whose user is now inactive (`FLAGS__Owner_Is_Active__c = false`).
+- **Now (open cases only):** current status and flag side by side, the follow-up date if set, and whether
+  the case was modified after the last CFHT change (`LastModifiedDate` later than the last record's
+  `End`: something changed that Case Flags doesn't track). Don't judge a status/flag mismatch unless the
+  person has said which statuses mean waiting on the customer.
+- **Shape:** handoff count; status-change count (if tracked);
+breach count (how many separate times it reached L4: count contiguous L4 stretches, not L4 records, since one breach can span several records); follow-up-reflag count; **recurrence count** (number of
 close events — `Action = 'Case Closed'`, either Event shape — beyond the first) and, if any, how each
 reopening was triggered; aging speed(s) that
 applied.
 
 **The "silent auto-close" pattern (Tier 2 — ambiguous, always neutral).** A case that gets a short final
 response, then times out into an automated-close status (readable directly from `FLAGS__Case_Status__c` on
-the closing record — e.g. one org's `"Closed (Automated)"` — since status is already a tracked CFHT
+the closing record — e.g. a status like `"Closed (Automated)"` — since status is already a tracked CFHT
 field) with no further customer engagement before that close, has a recognizable shape: one short
 `Follow-Up Process`-driven cycle at the end, then closure with nothing after it. **This shape alone cannot
 tell you whether the customer was satisfied or gave up — both look identical in CFHT.** Surface it as
@@ -71,7 +109,10 @@ something worth a second look, never as a finding. Do not speculate about which 
   large flag-down gaps). No interaction-by-interaction detail.
 
 For Coach, Audit, and Prep: always render the vitals block first, then a structured narrative scaled to
-the lens. Personalize is the one exception — no vitals block, just the 50-word paragraph.
+the lens, then a **Takeaway** sentence if the case trips any trigger in SKILL.md's constants (rules in
+`references/job-i-true-case-age.md`, "Takeaways"). No trigger, no takeaway line. Personalize is the one
+exception — no vitals block, just the 50-word paragraph. When a trigger fires there, the paragraph may
+carry the gist in the owner's own voice ("they've only replied when the follow-up nudged them").
 
 **Neutrality guardrail for the Personalize paragraph (and every lens, but easiest to violate here):**
 Because this format compresses several cycles into a short arc, it's tempting to smooth the numbers into
@@ -96,7 +137,7 @@ paragraph and every other lens's narrative. Don't infer gender from a name.
 **Optional compact vitals line for Personalize.** The 50-word paragraph is the default and typically all
 that's needed. If the person is reviewing several of their own cases side by side (rather than asking
 about one case before replying to it), a single compact line of key numbers above the paragraph can help —
-e.g. `Age 18d · 12 cycles · 14.06 BH with-company · 97.16 BH with-customer · max L3`. This is one line, not
+e.g. `Age 18d · 14.1 BH on us (12 waits, avg 1.2) · 97.2 BH on customer (11 waits, avg 8.8) · max L3`. This is one line, not
 the full vitals block, and stays optional rather than default: only add it when the person is scanning
 multiple cases or asks for the numbers alongside the narrative.
 

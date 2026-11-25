@@ -11,10 +11,11 @@ Pull the full CFHT history for one case, in order, with everything needed for co
 This query is the lazy probe when D is the session's first CFHT touch:
 
 ```sql
-SELECT Id, CreatedDate, FLAGS__Case_Flag_History_Number__c, FLAGS__Start__c, FLAGS__End__c,
-       FLAGS__Flag_Set__c, FLAGS__Flag_Level_BH__c, FLAGS__Event__c, FLAGS__Action__c, FLAGS__Reason__c,
-       FLAGS__Owner__c, FLAGS__Owner_Name__c, FLAGS__Queue_Id__c, FLAGS__Case_Status__c,
-       FLAGS__Aging_Speed__c, FLAGS__Business_Hours_Elapsed__c, FLAGS__Hours_Elapsed__c
+SELECT Id, CreatedDate, FLAGS__Case__c, FLAGS__Case__r.CaseNumber, FLAGS__Case_Flag_History_Number__c,
+       FLAGS__Start__c, FLAGS__End__c, FLAGS__Flag_Set__c, FLAGS__Flag_Level_BH__c, FLAGS__Event__c,
+       FLAGS__Action__c, FLAGS__Reason__c, FLAGS__Owner__c, FLAGS__Owner_Name__c, FLAGS__Queue_Id__c,
+       FLAGS__Owner_Is_Active__c, FLAGS__Case_Status__c, FLAGS__Aging_Speed__c,
+       FLAGS__Business_Hours_Elapsed__c, FLAGS__Hours_Elapsed__c, FLAGS__Business_Hours_in_Age_4__c
 FROM FLAGS__Case_Flags_History_Tracking__c
 WHERE FLAGS__Case__c = '{CASE_ID}'
 ORDER BY FLAGS__Start__c ASC
@@ -24,9 +25,15 @@ Also pull the Case's own aging thresholds (for the "long gap" comparison in tag 
 ```sql
 SELECT FLAGS__CaseTimeOffset1__c, FLAGS__CaseTimeOffset2__c, FLAGS__CaseTimeOffset3__c,
        FLAGS__CaseTimeOffset4__c, FLAGS__Aging_Speed__c, FLAGS__Initial_Response_Business_Hours__c,
-       CreatedDate, ClosedDate, Status
+       Id, CaseNumber, CreatedDate, ClosedDate, IsClosed, Status, LastModifiedDate,
+       FLAGS__ViewedFlag__c, {FOLLOW_UP_ON},
+       FLAGS__Business_Hours_Age_1__c, FLAGS__Business_Hours_Age_2__c,
+       FLAGS__Business_Hours_Age_3__c, FLAGS__Business_Hours_Age_4__c
 FROM Case WHERE Id = '{CASE_ID}'
 ```
+
+Save this row as the `--cases` file for `age_decompose.py` (it needs `IsClosed`, `ClosedDate`, the
+offsets and `ViewedFlag`). `LastModifiedDate` and `{FOLLOW_UP_ON}` feed Job D's "Now" line.
 
 **Detecting custom-tracked fields (F):** compare the non-null fields on the returned CFHT rows against the
 known set in `references/field-reference.md`. Any additional populated field is a customer-specific tracked
@@ -51,7 +58,7 @@ Semantics canonical in `references/field-reference.md` ("Recurrence" / "Close ev
 From the
 same pulled record set (no extra query needed): count close events — `Action = 'Case Closed'`, whether
 `Event` is `'Flag Cleared'` (closed while flagged) or `'Case Status Changed'` (closed while unflagged);
-more than one = recurred. For each reopening beyond the first, read the `Flag Set` record immediately
+more than one = recurred. For every close except the last (each one was followed by a reopening), read the `Flag Set` record immediately
 following the close (by `Start__c`) and classify its `Action__c` per the field-reference trigger rules.
 
 ### Recurrence rate (job E — portfolio level)

@@ -2,7 +2,7 @@
 name: case-flags-analyst
 license: Apache-2.0
 compatibility: Requires a connected Salesforce MCP server with read access to the Case Flags managed package (FLAGS__), and Python 3.9+ for the bundled scripts.
-description: Personal and managerial responsiveness analyst for the Vicasso Case Flags managed package, working over a connected Salesforce MCP. Use this whenever someone asks about their Case Flags work in plain language — "what's my day look like", "my flagged cases", "what should I work on", "am I overloaded / do I have a light day", "what's due today", "what's falling through the cracks" — or, for managers, "how is my team doing", "who's overloaded", "who needs help". Also use for Case Flags responsiveness questions - initial response time, ongoing responsiveness, interpreting Case Flags History Tracking, and going beyond the standard packaged reports. Trigger even when the person doesn't say "Case Flags" by name, as long as the org has Case Flags installed and the request is about flagged cases, follow-ups, response times, or triaging support work by urgency.
+description: Personal and managerial responsiveness analyst for the Vicasso Case Flags managed package, over a connected Salesforce MCP. Use whenever someone asks about their Case Flags work in plain language — "what's my day look like", "my flagged cases", "what should I work on", "am I overloaded", "what's due today", "what's falling through the cracks" — or, for managers, "how is my team doing", "who's overloaded", "who needs help". Also for responsiveness (initial and ongoing response time, Case Flags History Tracking, beyond the packaged reports) and case age ("true case age", "why is this case so old", "how old is our backlog", "time in status", our time vs the customer's). Trigger even when Case Flags isn't named, if the org has it installed and the ask is about flagged cases, follow-ups, response times or triage by urgency.
 ---
 
 # Case Flags Analyst
@@ -31,6 +31,7 @@ running any job queries** — do not work from memory of a job you haven't read 
 | "how long does it take to assign work vs respond", "time to assign vs time to respond", "does self-assigning skew our numbers", "split initial response into assignment time and response time" | F — Assignment/response decomposition | `references/job-f-assignment-response-split.md` |
 | "run the Case Flags reports", "the packaged metrics", "average time to respond by owner", "current red/black flags by owner", "recreate the Case Flags dashboard", or any of the six shipped reports by name | G — Packaged reports | `references/job-g-packaged-reports.md` |
 | "how has [account] experienced us", "account responsiveness", "how responsive is [account]", "responsiveness for [account] before the renewal", "which accounts are we slowest to", "which customers are least responsive to us", "how does [account] compare to normal / to our average" | H — Account responsiveness (two-sided) | `references/job-h-account-responsiveness.md` |
+| "true case age", "why is this case so old", "case age report", "how old is our backlog", "time in status", "how much of our resolution time is us vs the customer", "which old cases is nobody watching" | I — True Case Age (age broken down by court) | `references/job-i-true-case-age.md` |
 | "how much time do follow-ups cost me/us", "set up my time assumptions" — or automatically, once, the first time a follow-up-time-investment read is needed for someone who hasn't declared yet | Z — Setup: labor assumptions | `references/job-z-setup.md` |
 
 Shared plumbing: `references/field-reference.md` is canonical for **field meanings and data
@@ -41,13 +42,14 @@ section. **Read only the SOQL file(s) your job needs.**
 | § | File | Covers |
 |---|---|---|
 | §1 | `references/soql-preflight.md` | Preflight config read, plus the `{UID}` / `{CF_SCOPE}` placeholder conventions every other SOQL file uses |
-| §2–§4 | `references/soql-my-day.md` | Job A — flagged rings, follow-ups due today, stalest open cases |
+| §2–§4 | `references/soql-my-day.md` | Job A — flagged rings (incl. queue membership via groups/roles), follow-ups due today, overdue follow-ups, stalest open cases |
 | §5 | `references/soql-overload.md` | Job C — initial median, `labor_per_clear`, company-vs-customer split, intraday forecast |
 | §6 | `references/soql-timeline.md` | Jobs D, E — single-case CFHT pull, compression, recurrence |
 | §7 | `references/soql-team-view.md` | Job B — every roster input bulked across all direct reports |
 | §8 | `references/soql-followup-investment.md` | Jobs C, E — raw ordered pull for opening-trigger classification |
 | §9 | `references/soql-assignment-split.md` | Job F — case population, paginated CFHT pull, actor cross-check |
 | §10 | `references/soql-account.md` | Job H — two-sided account rollup, concentration, compare-to-normal |
+| §11 | `references/soql-case-age.md` | Job I — open backlog, closed-cohort population + aggregate, cohort CFHT pull, CaseHistory status fallback |
 
 Job files point into these rather than restating them.
 
@@ -65,6 +67,7 @@ the answer is a judgment rather than a calculation.
 | Contiguous flag-up runs → ongoing response, follow-up split, worst wait, customer turnaround | `scripts/run_stitch.py` |
 | Job F assignment vs response decomposition | `scripts/assignment_split.py` |
 | Any median / percentile / distribution, and `labor_per_clear` | `scripts/stats.py` |
+| Job I True Case Age buckets, cohort rollup, status × court, open-backlog aging | `scripts/age_decompose.py` |
 
 Write connector results to JSON, then pass the path (`--input`, or `--pages`/`--cfht`/`--cases`).
 Read `scripts/README.md` for the calling convention before first use. Two things worth knowing up
@@ -92,7 +95,10 @@ capabilities need the Case Flags History Tracking (CFHT) object — **single-cas
 **follow-up time-investment** add-on (Job C/E, `references/followup-time-investment.md`), and the full two-sided
 **account responsiveness** read (H). CFHT requires explicit object permissions and may not be reachable on a
 given connection; probe lazily (below) and degrade gracefully rather than failing. Job H degrades to a
-Case-field-only read (initial-response median + current flag-state snapshot) when CFHT is unavailable. Job Z
+Case-field-only read (initial-response median + current flag-state snapshot) when CFHT is unavailable. Job
+I (**True Case Age**) needs CFHT for the full breakdown by court, but its open-backlog lens runs on Case
+fields alone. Its closed-case read degrades to standard Age plus our-court and past-SLA BH, taken from
+the Case band rollups. Job Z
 (declaring labor assumptions) itself needs no CFHT — it's a plain read/write against
 `references/labor-assumptions.md` —
 but there's little reason to run it before CFHT is confirmed available, since its output only feeds a
@@ -121,8 +127,14 @@ connection. From the Preflight, hold these for the rest of the session:
 - **Business hours** — present age/timing in whatever dimension the org runs on; you never ask the user. Do
   **not** infer "no business hours" from a null `FLAGS__BusinessHoursId__c` at the org-default row: a null
   there is common even when business-hours mode is fully active (a per-speed or per-entitlement calendar
-  applies). Confirm from the data instead — if `FLAGS__Business_Hours_Elapsed__c` runs well below
-  `FLAGS__Hours_Elapsed__c`, BH is in effect; lead with BH.
+  applies). Confirm from the data instead, using Case fields so the check works without CFHT: if
+  `FLAGS__Initial_Response_Business_Hours__c` runs well below `FLAGS__Initial_Response_Hours__c` on recent
+  responded cases (or `FLAGS__Case_Flag_Business_Age__c` below `FLAGS__Case_Flag_Age__c` on flagged ones),
+  BH is in effect, so lead with BH. CFHT's `Business_Hours_Elapsed__c` vs `Hours_Elapsed__c` gives the same
+  answer when CFHT is available.
+- **Follow-up disabled** — when `FLAGS__Enable_Follow_Up_Process__c` is false, `{FOLLOW_UP_ON}` /
+  `{NEXT_STEPS}` may be blank: remove those columns and conditions from every query before running it,
+  rather than substituting an empty name.
 
 Resolve case links from the org base URL: render `CaseNumber` as a link to
 `/lightning/r/Case/{Id}/view`. If the base URL can't be determined, show the plain number.
@@ -183,6 +195,52 @@ Account outlier / concentration (job H — per side, our-court and customer-cour
     A worst case whose largest single interval clears this bar is a STALL (a dropped ball);
     one whose time is spread across many intervals with no single interval reaching it is a
     VOLUME/ITERATION outlier (complex, many-round case — fast per reply, not neglected).
+
+True Case Age (job I):
+  Backlog age buckets (calendar days since CreatedDate): 0–1, 1–3, 3–7, 7–30, 30+.
+    Passed to age_decompose.py as --edges 1,3,7,30.
+  Forgotten: open, NOT flagged (FLAGS__ViewedFlag__c null) AND no Follow-Up On date.
+  Post-resolution: the flag-down STRETCH ending in the case's FINAL close (Action = 'Case Closed'),
+    plus flag-down time in any status the person names as resolved (--resolved-statuses).
+  Working days: BH ÷ the hours in that calendar's business day (from BusinessHours). Never BH ÷ 24.
+  Rep-logged:   a genuine clear within 60 s of the case's first CFHT record (initial response
+                < 0.0167 h). Excluded from the skill's own initial-response medians (report the
+                count left out); never from job G's reproductions.
+  Housekeeping clears: Action 'Case Closed' or 'Automatically Cleared'. Never a response.
+  Resolved reverted on reply: resolved -> non-resolved status within 60 s of a genuine clear, with
+                no customer contact since the resolved status began. Org automation, not Case Flags.
+  Close fallback: no 'Case Closed' Action -> the transition into a --closed-statuses status, else the
+                record ending within 5 s of ClosedDate (orgs with "Clear flag on case close" off).
+  Spotlight score: triggers fired + max flag level reached + reopens + priority/speed changes +
+                returns to a previous owner; ties by our-court BH. Exclude long-running case types
+                the person names.
+
+Takeaway triggers (job I "Takeaways"; any one earns a case a takeaway line, none means no line):
+  Silent customer:   >= 2 waits on the customer ended by the Follow-Up Process AND >= half of them.
+  Many rounds:       waits on us above the comparison set's 90th percentile (no set: >= 15).
+  Slow reply:        longest wait on us >= the case's ET3 offset (FLAGS__CaseTimeOffset3__c, the
+                     same stall bar as job H), or any time past SLA.
+  Long silence:      longest wait on the customer >= 3x the flag-down long-gap bar above (48 BH).
+  Parked:            FLAG-DOWN time in a status that is not the main waiting-on-customer status,
+                     not a resolved status and not a closed status holds >= 25% of the BH within
+                     Age AND >= the case's ET3 offset (e.g. On Hold, or "Working" with the flag
+                     down). Flag-up time in New/Working is normal work, not parking.
+  Slow to close:     resolved-not-closed >= 1.5x the comparison median among cases that had any
+                     (no set: >= 30 BH). Not a share of Age: a fixed close timer (e.g. a set
+                     number of BH in a pending-closure status) dominates short cases and is normal.
+  After close:       >= 1 BH worked after the final close.
+  Queue dwell:       queue time >= the case's ET2 offset (it reached L2 before anyone owned it).
+  Lifecycle:         reopened, partial history, or mixed aging speeds.
+  Closed contact:    the customer wrote while the case was closed (flag set on a closed case).
+  Reverted on reply: a resolved status reverted on our reply (org automation; only when resolved
+                     statuses were named).
+  Pattern, not a takeaway: a trigger that fires on >= 25% of the cases in a review is stated once
+                     for the review (with the count), not repeated as each case's takeaway. A case
+                     still gets a takeaway if some OTHER trigger fires for it.
+  Calibrated on production cases: looser rules fired on nearly every case.
+  Comparison median: the other cases in the same review when there are >= 5; otherwise the org's
+                     own trailing-90-day medians if already computed this session; otherwise the
+                     fixed fallback above. Never compare across aging speeds raw.
 ```
 
 ---

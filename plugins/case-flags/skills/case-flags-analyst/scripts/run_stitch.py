@@ -19,8 +19,9 @@ Modes
   followup-split  genuine clears bucketed by opening trigger (Follow-Up Process vs
                   other), per owner, plus the same-day batching gap
   worst-run       longest run per case and overall (job-h worst wait)
-  down-intervals  customer-court turnaround: flag-DOWN interval stats, excluding the
-                  trailing post-resolution dwell
+  down-intervals  customer-court turnaround PER WAIT: contiguous flag-down records
+                  stitched into one wait (same idea as flag-up runs), excluding
+                  waits that end in a close, closed-gap waits, and window-cut waits
 
 Input: JSON from references/soql-followup-investment.md §8 (or references/soql-account.md
 §10.6 / references/soql-timeline.md §6), ordered by case then Start.
@@ -42,7 +43,12 @@ from collections import defaultdict
 
 from cfa_common import (
     DataError,
+    cfht_sort_key,
     check_variance,
+    is_first_record,
+    is_genuine_clear,
+    is_housekeeping_clear,
+    truthy,
     describe,
     emit,
     fnum,
@@ -50,6 +56,7 @@ from cfa_common import (
     load_records,
     median,
     parse_dt,
+    shift,
     require_columns,
     table,
     to_float,
@@ -66,15 +73,6 @@ BH = "FLAGS__Business_Hours_Elapsed__c"
 FOLLOW_UP_TRIGGER = "Follow-Up Process"
 CASE_CLOSED = "Case Closed"
 FLAG_CLEARED = "Flag Cleared"
-
-
-def truthy(value) -> bool:
-    """Flag_Set arrives as a real bool from most connectors, as a string from some."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"true", "t", "yes", "1"}
-    return bool(value)
 
 
 def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
@@ -103,7 +101,7 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
     for case_id, case_records in by_case.items():
         # Re-sort defensively: relying on the caller's ORDER BY is how off-by-one
         # walks creep in, and sorting a few thousand rows is free.
-        case_records.sort(key=lambda r: (parse_dt(get(r, START)) or parse_dt("1900-01-01")))
+        case_records.sort(key=cfht_sort_key)
 
         index = 0
         total = len(case_records)
@@ -121,14 +119,20 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
             preceding = case_records[start_index - 1] if start_index > 0 else None
             closing_event = get(last, EVENT)
             closing_action = get(last, ACTION)
-            is_close = closing_action == CASE_CLOSED
+            # Either housekeeping clear ends a run on a closed case: 'Case Closed' at the
+            # close, or 'Automatically Cleared' by the nightly job afterwards.
+            is_close = is_housekeeping_clear(last)
 
             runs.append(
                 {
                     "case": case_id,
                     "case_number": get(run_records[0], "FLAGS__Case__r.CaseNumber"),
-                    "owner": get(run_records[0], "FLAGS__Owner__c"),
-                    "owner_name": get(run_records[0], "FLAGS__Owner_Name__c"),
+                    # The owner on the LAST record is who cleared it (or holds it now):
+                    # a flag raised under a queue and answered after assignment belongs
+                    # to the person who answered.
+                    "owner": get(last, "FLAGS__Owner__c"),
+                    "owner_name": get(last, "FLAGS__Owner_Name__c"),
+                    "opening_owner": get(run_records[0], "FLAGS__Owner__c"),
                     "start": get(run_records[0], START),
                     "end": get(last, END),
                     "intervals": len(run_records),
@@ -137,12 +141,16 @@ def build_runs(records: list[dict], need_bh: bool = True) -> list[dict]:
                         (to_float(get(r, BH)) or 0.0) for r in run_records
                     ),
                     "opening_trigger": get(preceding, ACTION) if preceding else None,
-                    "flagged_at_creation": preceding is None,
+                    # No preceding record has two causes: the case really was flagged at
+                    # creation (history number 001), or the pull's window starts mid-case.
+                    # Only the first is "at creation"; the second is truncated history.
+                    "flagged_at_creation": preceding is None and is_first_record(run_records[0]),
+                    "truncated_start": preceding is None and not is_first_record(run_records[0]),
                     "closing_event": closing_event,
                     "closing_action": closing_action,
-                    # A genuine clear is a human reply. The Flag Cleared + Case Closed
-                    # shape is close housekeeping and is excluded everywhere.
-                    "genuine_clear": closing_event == FLAG_CLEARED and not is_close,
+                    # A genuine clear is a response; both housekeeping shapes (Case
+                    # Closed, Automatically Cleared) are excluded everywhere.
+                    "genuine_clear": is_genuine_clear(last),
                     "housekeeping_close": is_close,
                     "closed_run": is_close,
                 }
@@ -161,6 +169,20 @@ def collect_warnings(runs: list[dict], records: list[dict]) -> list[str]:
         warnings.append(
             f"All {len(runs)} runs computed to 0.00 BH. Confirm {BH} was in the SELECT "
             "list and actually populated -- an all-zero column is a data bug, not a finding."
+        )
+    truncated = sum(1 for r in runs if r.get("truncated_start"))
+    if truncated:
+        warnings.append(
+            f"{truncated} run(s) start at the first record IN THE PULL but not the case's first "
+            "record: the window cut them. Their BH total is short and their opening trigger is "
+            "unreadable; excluded from the follow-up/other split as truncated, not 'at creation'."
+        )
+    if runs and not any(get(r, "FLAGS__Case_Flag_History_Number__c") or get(r, "Name")
+                        for r in records[:50]):
+        warnings.append(
+            "History number not selected (FLAGS__Case_Flag_History_Number__c): ties on Start "
+            "can't be ordered reliably and window-truncated runs can't be told from runs "
+            "flagged at creation. Add it to the SELECT."
         )
     orphans = sum(1 for r in runs if r["flagged_at_creation"])
     if orphans:
@@ -184,17 +206,24 @@ def mode_ongoing(runs: list[dict]) -> dict:
     """
     genuine = [r for r in runs if r["genuine_clear"]]
 
-    per_case: dict[str, list[float]] = defaultdict(list)
-    for run in genuine:
-        per_case[run["case"]].append(run["bh_total"])
-
-    case_means = [sum(v) / len(v) for v in per_case.values() if v]
+    # Method (a) exactly as references/field-reference.md defines it (and as the two
+    # GROUP BY queries compute it): per case, ALL flag-up BH / genuine-clear count. It
+    # includes flag-up time in runs that ended in a close or are still open, which is
+    # why it can differ from (b). Averaging only the genuine runs would make (a) and (b)
+    # agree by construction and hide that gap.
+    up_bh: dict[str, float] = defaultdict(float)
+    clears: dict[str, int] = defaultdict(int)
+    for run in runs:
+        up_bh[run["case"]] += run["bh_total"]
+        if run["genuine_clear"]:
+            clears[run["case"]] += 1
+    case_means = [up_bh[c] / n for c, n in clears.items() if n]
 
     return {
         "mode": "ongoing",
         "runs_total": len(runs),
         "genuine_clear_runs": len(genuine),
-        "cases_with_genuine_clears": len(per_case),
+        "cases_with_genuine_clears": len(clears),
         "method_a_median_of_per_case_means": median(case_means),
         "method_a_detail": describe(case_means),
         "method_b_median_of_run_totals": median([r["bh_total"] for r in genuine]),
@@ -202,7 +231,20 @@ def mode_ongoing(runs: list[dict]) -> dict:
     }
 
 
-def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
+GROUP_FIELDS = {"FLAGS__Owner__c": "owner", "FLAGS__Owner_Name__c": "owner_name"}
+
+
+def _run_group(run: dict, group_by: str | None) -> str:
+    """Group key for a run. Honors the field actually passed to --group-by."""
+    if not group_by:
+        return "all"
+    value = run.get(GROUP_FIELDS[group_by])
+    # A queue-held run has a null Owner__c (verified live); fall back to the name.
+    return str(value or run.get("owner_name") or "(no owner)")
+
+
+def mode_followup_split(runs: list[dict], group_by: str | None, utc_offset: float = 0.0,
+                        owners: frozenset = frozenset()) -> dict:
     """
     Bucket genuine clears by opening trigger, per group.
 
@@ -217,12 +259,17 @@ def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
     )
 
     for run in runs:
-        key = (run.get("owner_name") or run.get("owner") or "all") if group_by else "all"
-        bucket = groups[key]
-
+        # Only genuine clears count; checking first means a group with no genuine clears
+        # never appears as an all-zero row.
         if not run["genuine_clear"]:
             continue
-        if run["flagged_at_creation"]:
+        # §8 pulls every record on the rep's cases, so clears by other owners are in the
+        # input: keep only the ones the named owner(s) gave.
+        if owners and run["owner"] not in owners and run["owner_name"] not in owners:
+            continue
+        key = _run_group(run, group_by)
+        bucket = groups[key]
+        if run["flagged_at_creation"] or run.get("truncated_start"):
             bucket["excluded_at_creation"] += 1
             continue
 
@@ -238,7 +285,7 @@ def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
             "followup_clears": bucket["followup_clears"],
             "other_clears": bucket["other_clears"],
             "excluded_at_creation": bucket["excluded_at_creation"],
-            "batching": batching_gap(bucket["followup_end_times"]),
+            "batching": batching_gap(bucket["followup_end_times"], utc_offset),
         }
 
     return {"mode": "followup-split", "groups": results,
@@ -246,7 +293,7 @@ def mode_followup_split(runs: list[dict], group_by: str | None) -> dict:
                     "to convert to hours. Run BH is NOT a labour proxy."}
 
 
-def batching_gap(end_times: list) -> dict:
+def batching_gap(end_times: list, utc_offset: float = 0.0) -> dict:
     """
     Median gap between consecutive same-day follow-up clears (3+ on a day).
 
@@ -259,7 +306,8 @@ def batching_gap(end_times: list) -> dict:
     for value in end_times:
         parsed = parse_dt(value)
         if parsed:
-            by_day[parsed.date().isoformat()].append(parsed)
+            # Group by the rep's LOCAL day: a US afternoon spans two UTC dates.
+            by_day[shift(parsed, utc_offset).date().isoformat()].append(parsed)
 
     gaps: list[float] = []
     batch_days = 0
@@ -332,29 +380,88 @@ def mode_worst_run(runs: list[dict], stall_bar: float | None) -> dict:
     return result
 
 
-def mode_down_intervals(records: list[dict]) -> dict:
+def mode_down_intervals(records: list[dict], resolved_statuses: frozenset = frozenset()) -> dict:
     """
-    Customer-court turnaround: flag-DOWN interval stats.
+    Customer-court turnaround, one value per WAIT.
 
-    Excludes the trailing post-resolution dwell (Action = 'Case Closed'), which would
-    otherwise inflate the account's apparent slowness with pending-closure time.
+    A wait is a maximal run of contiguous Flag_Set = false records for one case. A
+    status or owner change in the middle of a wait splits it across records; counting
+    per record would turn one 3-day wait into several short ones and make the customer
+    look faster than they are (the same trap field-reference.md describes for flag-up
+    time).
+
+    Excluded, by reason (references/field-reference.md "Post-resolution time"):
+      ended_in_close  the wait ends at a close (Action = 'Case Closed'): nobody replied,
+                      the case closed. On the final close this is the post-resolution
+                      dwell; on an earlier close it is still not a turnaround.
+      closed_gap      the wait starts right after a close or an Automatically Cleared
+                      clear: the case sat closed.
+      truncated       the wait starts at the first record of the pull but not of the
+                      case (history number > 1): the window cut it short.
+    Kept waits are tagged by what ended them (Email Received vs Follow-Up Process...),
+    since a follow-up re-flag means the customer still hadn't replied.
     """
-    require_columns(records, [FLAG_SET, ACTION, BH], "run_stitch down-intervals")
+    require_columns(records, [CASE, START, FLAG_SET, ACTION, BH], "run_stitch down-intervals")
 
-    values, excluded = [], 0
+    by_case: dict[str, list[dict]] = defaultdict(list)
     for record in records:
-        if truthy(get(record, FLAG_SET)):
-            continue
-        if get(record, ACTION) == CASE_CLOSED:
-            excluded += 1
-            continue
-        value = to_float(get(record, BH))
-        if value is not None:
-            values.append(value)
+        if get(record, CASE):
+            by_case[get(record, CASE)].append(record)
 
+    waits: list[dict] = []
+    excluded = {"ended_in_close": 0, "closed_gap": 0, "truncated": 0, "resolved_only": 0}
+    for case_id, case_records in by_case.items():
+        case_records.sort(key=cfht_sort_key)
+        index, total = 0, len(case_records)
+        while index < total:
+            if truthy(get(case_records[index], FLAG_SET)):
+                index += 1
+                continue
+            begin = index
+            while index < total and not truthy(get(case_records[index], FLAG_SET)):
+                index += 1
+                # A close ends the wait even when the flag stays down: the time after it
+                # is closed-gap time, a different thing (seen in reopened cases).
+                if get(case_records[index - 1], ACTION) == CASE_CLOSED:
+                    break
+                # A flag cleared by housekeeping: what follows is the case sitting closed.
+            if begin > 0 and is_housekeeping_clear(case_records[begin - 1]):
+                excluded["closed_gap"] += 1
+                continue
+            wait = case_records[begin:index]
+            before = case_records[begin - 1] if begin > 0 else None
+
+            if get(wait[-1], ACTION) == CASE_CLOSED:
+                excluded["ended_in_close"] += 1
+            elif before is not None and get(before, ACTION) == CASE_CLOSED:
+                excluded["closed_gap"] += 1
+            elif resolved_statuses and all(
+                    get(r, "FLAGS__Case_Status__c") in resolved_statuses for r in wait):
+                excluded["resolved_only"] += 1
+            elif before is None and not is_first_record(wait[0]):
+                excluded["truncated"] += 1
+            else:
+                waits.append({
+                    "case": case_id,
+                    "records": len(wait),
+                    # Time in a status the person named as resolved isn't the
+                    # customer's move; drop it without splitting the wait (same rule
+                    # as age_decompose --resolved-statuses).
+                    "bh": sum(to_float(get(r, BH)) or 0.0 for r in wait
+                              if get(r, "FLAGS__Case_Status__c") not in resolved_statuses),
+                    "ended_by": get(wait[-1], ACTION) or "(unknown)",
+                })
+
+    values = [w["bh"] for w in waits]
+    ended_by: dict[str, int] = defaultdict(int)
+    for w in waits:
+        ended_by[w["ended_by"]] += 1
     return {
         "mode": "down-intervals",
-        "excluded_post_resolution": excluded,
+        "waits": len(waits),
+        "split_waits": sum(1 for w in waits if w["records"] > 1),
+        "excluded": excluded,
+        "ended_by": dict(ended_by),
         "turnaround": describe(values),
         "worst_gap_bh": max(values) if values else None,
     }
@@ -386,6 +493,8 @@ def render(payload: dict) -> None:
             print(f"\nrun totals: p25 {fnum(detail['p25'])} | p75 {fnum(detail['p75'])} "
                   f"| p90 {fnum(detail['p90'])} | max {fnum(detail['max'])} "
                   f"| tail ratio {fnum(detail['tail_ratio'])}")
+            if detail.get("tail_note"):
+                print(detail["tail_note"])
 
     elif mode == "followup-split":
         rows = []
@@ -397,7 +506,7 @@ def render(payload: dict) -> None:
                 f"{fnum(gap, 1)} min" if gap is not None else "none",
             ])
         print(table(rows, ["Group", "Follow-up clears", "Other clears",
-                           "Excluded (at creation)", "Batching gap"]))
+                           "Excluded (at creation or truncated)", "Batching gap"]))
         print(f"\n{payload['note']}")
 
     elif mode == "worst-run":
@@ -421,10 +530,16 @@ def render(payload: dict) -> None:
 
     elif mode == "down-intervals":
         stats = payload["turnaround"]
-        print(f"excluded post-resolution dwell rows: {payload['excluded_post_resolution']}\n")
+        ex = payload["excluded"]
+        print(f"waits {payload['waits']} ({payload['split_waits']} spanned more than one record) | "
+              f"excluded: ended in close {ex['ended_in_close']}, closed gap {ex['closed_gap']}, "
+              f"window-cut {ex['truncated']}, resolved-only {ex['resolved_only']}")
+        print("ended by: " + ", ".join(f"{k} {v}" for k, v in sorted(payload["ended_by"].items())) + "\n")
         print(f"n {stats.get('n')} | median {fnum(stats.get('median'))} BH "
               f"| mean {fnum(stats.get('mean'))} BH | worst gap "
               f"{fnum(payload.get('worst_gap_bh'))} BH")
+        if stats.get("tail_note"):
+            print(stats["tail_note"])
 
     else:
         rows = [[r.get("case_number") or r["case"], r["intervals"], fnum(r["bh_total"]),
@@ -441,11 +556,20 @@ def main() -> int:
     parser.add_argument("--mode", default="ongoing",
                         choices=["runs", "ongoing", "followup-split", "worst-run",
                                  "down-intervals"])
-    parser.add_argument("--group-by", default=None,
-                        help="group followup-split by owner (pass FLAGS__Owner__c)")
+    parser.add_argument("--group-by", default=None, choices=sorted(GROUP_FIELDS),
+                        help="group followup-split by owner Id or owner name")
     parser.add_argument("--stall-bar", type=float, default=None,
                         help="worst-run: org ET3 offset in BH from Preflight "
                              "(FLAGS__TimeOffset3__c). Never hardcode this.")
+    parser.add_argument("--resolved-statuses", default="",
+                        help="down-intervals: comma list of statuses meaning resolved, waiting "
+                             "to close; their time is dropped from customer waits")
+    parser.add_argument("--owners", default="",
+                        help="followup-split: comma list of owner Ids or names; keep only "
+                             "clears those owners gave (§8 pulls other owners' records too)")
+    parser.add_argument("--utc-offset", type=float, default=0.0,
+                        help="followup-split: the rep's UTC offset in hours (e.g. -5 for US "
+                             "Eastern standard time) so batching days are local days")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -456,7 +580,12 @@ def main() -> int:
             return 1
 
         if args.mode == "down-intervals":
-            payload = mode_down_intervals(records)
+            resolved = frozenset(x.strip() for x in args.resolved_statuses.split(",") if x.strip())
+            if resolved:
+                # Without the status column the option would silently do nothing.
+                require_columns(records, ["FLAGS__Case_Status__c"],
+                                "run_stitch down-intervals --resolved-statuses")
+            payload = mode_down_intervals(records, resolved)
             payload["warnings"] = []
         else:
             runs = build_runs(records)
@@ -466,7 +595,8 @@ def main() -> int:
             elif args.mode == "ongoing":
                 payload = mode_ongoing(runs)
             elif args.mode == "followup-split":
-                payload = mode_followup_split(runs, args.group_by)
+                owners = frozenset(x.strip() for x in args.owners.split(",") if x.strip())
+                payload = mode_followup_split(runs, args.group_by, args.utc_offset, owners)
             else:
                 payload = mode_worst_run(runs, args.stall_bar)
             payload["warnings"] = warnings

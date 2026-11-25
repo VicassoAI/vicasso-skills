@@ -44,24 +44,49 @@ ORDER BY Parent.FLAGS__CaseFlagsEscalationTime4__c ASC
 
 ### Ring 3 — Flagged cases in my queues (unassigned to a person)
 
-One query via semi-join (verified live — matches the explicit-Id-list result exactly). `Owner.Name` on a
-queue-owned case is the queue's name, for display:
+Queue membership can be direct, or through a **public group** or a **role** (verified: queue memberships held
+by groups and roles, not users, are common). Resolve the user's groups first, then the queues.
+All of these queries were verified live.
+
+**Ring 3, step 1: the user's role chain.** Start from the role Id (from the identity step, or
+`SELECT UserRoleId FROM User WHERE Id = '{UID}'`) and follow `ParentRoleId` until it's null:
+```sql
+SELECT Id, ParentRoleId FROM UserRole WHERE Id = '{ROLE_ID}'
+```
+
+**Ring 3, step 2: groups the user is in.**
+```sql
+SELECT GroupId FROM GroupMember WHERE UserOrGroupId = '{UID}' AND Group.Type = 'Regular'
+```
+```sql
+SELECT Id FROM Group
+WHERE (RelatedId = '{ROLE_ID}' AND Type IN ('Role','RoleAndSubordinates','RoleAndSubordinatesInternal'))
+   OR (RelatedId IN ({ANCESTOR_ROLE_IDS}) AND Type IN ('RoleAndSubordinates','RoleAndSubordinatesInternal'))
+```
+Public groups can be nested, so add one more hop (groups that contain the groups found so far):
+```sql
+SELECT GroupId FROM GroupMember WHERE Group.Type = 'Regular' AND UserOrGroupId IN ({GROUP_IDS})
+```
+
+**Ring 3, step 3: queues** for the user plus every group found (`{MEMBER_IDS}` = `{UID}` + all group Ids):
+```sql
+SELECT GroupId FROM GroupMember WHERE Group.Type = 'Queue' AND UserOrGroupId IN ({MEMBER_IDS})
+```
+
+**Ring 3, step 4: the cases.** Cases already in Ring 2 (I'm on the case team) are excluded, so a case shows once:
 ```sql
 SELECT Id, CaseNumber, Subject, Status, Account.Name, OwnerId, Owner.Name,
        FLAGS__Case_Flag_Business__c, FLAGS__Aging_Speed__c, FLAGS__CaseFlagsEscalationTime4__c
 FROM Case
 WHERE FLAGS__ViewedFlag__c != null
-  AND OwnerId IN (SELECT GroupId FROM GroupMember
-                  WHERE UserOrGroupId = '{UID}' AND Group.Type = 'Queue')
+  AND OwnerId IN ({QUEUE_IDS})
+  AND Id NOT IN (SELECT ParentId FROM CaseTeamMember WHERE MemberId = '{UID}')
   {CF_SCOPE}
 ORDER BY FLAGS__CaseFlagsEscalationTime4__c ASC
 ```
-If a connector rejects the semi-join, fall back to two steps — queues first:
-```sql
-SELECT GroupId FROM GroupMember
-WHERE UserOrGroupId = '{UID}' AND Group.Type = 'Queue'
-```
-then the same Case query with `OwnerId IN ({QUEUE_IDS})`.
+`Owner.Name` on a queue-owned case is the queue's name, for display. If the role steps can't run (no
+role, or no access to `UserRole`), use direct and public-group membership, and say that role-based
+queues may be missing.
 ## 3. My Day — Follow-ups due today (owned, unflagged)
 
 ```sql
@@ -73,9 +98,36 @@ WHERE OwnerId = '{UID}'
   {CF_SCOPE}
 ORDER BY {FOLLOW_UP_ON} ASC
 ```
+## 3b. My Day — Overdue follow-ups (owned, unflagged, follow-up date already past)
+
+```sql
+SELECT Id, CaseNumber, Subject, Status, Account.Name, {FOLLOW_UP_ON}, {NEXT_STEPS}
+FROM Case
+WHERE OwnerId = '{UID}'
+  AND IsClosed = false
+  AND FLAGS__ViewedFlag__c = null
+  AND {FOLLOW_UP_ON} < TODAY
+  {CF_SCOPE}
+ORDER BY {FOLLOW_UP_ON} ASC
+```
+These fall between §3 (due today) and §4 (no date at all), so without this query they appear nowhere.
+
 ## 4. My Day — Open Cases (owned, unflagged, no follow-up, longest since activity)
 
-Fetch a candidate set with recent-touch subqueries, then compute true last-activity and take the top 5:
+**Count first.** The candidate query orders by `LastModifiedDate`, and automation that touches a case
+updates that date without any human activity. A capped candidate set can therefore drop a genuinely
+stale case. Count the candidates:
+```sql
+SELECT COUNT(Id) FROM Case
+WHERE OwnerId = '{UID}' AND FLAGS__ViewedFlag__c = null AND {FOLLOW_UP_ON} = null
+  AND IsClosed = false {CF_SCOPE}
+```
+- **500 or fewer:** run the query below **without** `LIMIT`, so every candidate gets its true
+  last-activity.
+- **More than 500:** keep `LIMIT 500` and say the list was drawn from the 500 least recently modified
+  cases, so it may miss some.
+
+Then fetch the candidates with recent-touch subqueries, compute true last-activity, and take the top 5:
 ```sql
 SELECT Id, CaseNumber, Subject, Status, Account.Name, LastModifiedDate, {NEXT_STEPS},
        (SELECT CreatedDate FROM CaseComments ORDER BY CreatedDate DESC LIMIT 1),
@@ -87,7 +139,6 @@ WHERE OwnerId = '{UID}'
   AND IsClosed = false
   {CF_SCOPE}
 ORDER BY LastModifiedDate ASC
-LIMIT 50
 ```
 last-activity = max(latest CaseComment.CreatedDate, latest EmailMessage.MessageDate); fall back to
 LastModifiedDate only if neither child exists. Sort ascending by last-activity; show the 5 stalest.

@@ -19,8 +19,10 @@ company-vs-customer split. Go beyond them:
   and
   triggers Job Z (`references/job-z-setup.md`) for anyone who hasn't declared yet
 - ownership-churn / handoff analysis
-- time-in-status and time-in-priority
-- aging-band bottlenecks
+- time-in-status (split by court) and aging-band bottlenecks (time past SLA). Method lives in **Job I**
+  (`references/job-i-true-case-age.md`, `scripts/age_decompose.py --mode status|cohort`); use it rather
+  than re-deriving here
+- time-in-priority
 - follow-up adherence
 - queue-dwell vs owner-dwell
 - outliers; team/cohort comparisons

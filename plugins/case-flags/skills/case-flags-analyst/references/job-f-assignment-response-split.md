@@ -5,9 +5,8 @@ CFHT-dependent. Splits `FLAGS__Initial_Response_Business_Hours__c` into two part
 - **Response time**: That landing point → the flag actually clearing (initial response)
 
 These two must sum to the case's total initial-response BH. Use this as a mandatory reconciliation
-check — if they don't sum, the split logic has a bug, not the data. Validated across three
-independent reps' populations (601 handoff cases total) with reconciliation error at floating-point
-noise level (~1e-16) in every case — treat any larger discrepancy as a bug in a future run, not as
+check — if they don't sum, the split logic has a bug, not the data. Validated on production data with
+reconciliation error at floating-point noise level — treat any larger discrepancy as a bug in a future run, not as
 real data variance.
 
 ## Self vs. peer vs. no-handoff
@@ -23,7 +22,7 @@ Every case falls into exactly one bucket:
 - **Peer-assigned**: someone else (a teammate) performed the transition that landed the case with
   its final owner.
 - **No handoff recorded**: no `Case Owner Changed` event exists for this case within the CFHT
-  retention window (`FLAGS__HistoryTrackingMonths__c`). Treat assignment time as unknown/0 and
+  retention window (`FLAGS__HistoryTrackingMonths__c`). Treat assignment time as unknown (left out of the assignment medians, not counted as 0) and
   response time as the full total — do NOT guess who assigned it or when. In validation this bucket
   ran ~10-26% of each rep's population; it's common enough to always report as its own line, not a
   footnote.
@@ -56,9 +55,16 @@ action determines that duration. Earlier hops are invisible to this metric by de
    wrong) finding rather than a missing column. This exact mistake happened once already in the
    development of this job; treat its absence from the SELECT list as a blocking bug in any future
    run.
-4. Per case, walk records in Start order. Find the index `i` where `FLAGS__Owner__c` first equals
-   the case's final owner AND the record at `i-1` has a different owner. Record `i-1` is the true
-   landing transition — **not** record `i`. In one verified example, record `i` was a
+4. Per case, walk records in Start order (ties broken by `FLAGS__Case_Flag_History_Number__c`), and
+   **only up to the initial response**: the first `Flag Cleared` record. The owner on that record is the
+   responder.
+   - **Answered by someone else:** if the responder isn't the rep, put the case in its own
+     `answered_by_other` bucket and leave it out of the rep's numbers. The §9.1 population is cases the
+     rep owns *now*, which includes cases someone else answered and handed over later. Walking past the
+     response would count post-response time as "assignment" and push the response negative.
+   - **Otherwise:** within that stretch, find the **last** index `i` where the owner is the rep and the
+     record at `i-1` has a different owner (the FINAL landing, per the multi-hop rule above). Record
+     `i-1` is the true landing transition — **not** record `i`. In one verified example, record `i` was a
    `Case Status Changed` / `Local Automation` blip that fired seconds after the real ownership
    change, under a different user's session — using it as "the" transition silently misattributes
    the actor. Always locate the actual `Event = 'Case Owner Changed'` record; don't assume "first
@@ -90,7 +96,7 @@ only and filter old/new values in code afterward.
 
 1. **Missing `Business_Hours_Elapsed__c` in the SELECT list.** Produces a uniform, plausible-looking
    "0.00 assignment time for every case" result. This is NOT a real finding (queue dwell time is
-   genuinely non-trivial — validated mean 0.5-0.6 BH, max 4-7 BH across three reps) — it's a silent
+   genuinely non-trivial in production data) — it's a silent
    data-availability bug. Any run showing literally zero variance across an entire population is a
    signal to check the field list before reporting the result.
 2. **Using "first record with the right owner" instead of the actual transition record.** The first
@@ -122,7 +128,7 @@ Report, per rep, per bucket (self / peer / no-handoff):
 
 Cross-tab by assigner → final-owner pair for peer-assigned cases, same as Job B/E style breakdowns.
 
-Always call out the self-vs-peer response-time gap explicitly if present — in both validated cases
-so far, self-assigned cases were answered meaningfully faster (2-3x) than peer-assigned ones. This
+Always call out the self-vs-peer response-time gap explicitly if present — in production data
+so far, self-assigned cases were answered meaningfully faster than peer-assigned ones. This
 is worth a manager's attention (e.g., it may mean handoffs sit in an inbox before being noticed) and
 should not get buried in a table without comment.

@@ -34,7 +34,7 @@ cannot observe on its own — so it has to ask.
 
 ## Writing back
 
-Use `str_replace` against `references/labor-assumptions.md` to add or update the person's row in the
+Use the file-edit tool available in this environment against `references/labor-assumptions.md` to add or update the person's row in the
 "Declared values by person" table. This is a real edit to the skill's own file, not a session-only value —
 say so plainly ("I've saved that to your labor assumptions file") so the person knows it will persist
 across sessions, and remind them that if this skill gets repackaged/reinstalled from a version prior to
